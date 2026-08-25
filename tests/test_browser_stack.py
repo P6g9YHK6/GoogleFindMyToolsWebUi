@@ -18,6 +18,7 @@ class _FakeProc:
 
     def __init__(self, returncode=0):
         self.returncode = returncode
+        self.pid = 12345  # _run_with_idle_timeout logs this; never a real pid here
 
     async def wait(self):
         return self.returncode

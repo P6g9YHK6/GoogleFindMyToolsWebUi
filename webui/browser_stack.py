@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 import urllib.request
 import zipfile
 from collections.abc import Awaitable, Callable
@@ -94,10 +95,18 @@ async def _run_with_idle_timeout(
 
     Returns every line seen (mainly so a failure can quote apt/dpkg's own
     error text) and the real exit code - or -1 if it had to be killed for
-    going quiet, mirroring _wait()'s own timeout convention."""
+    going quiet, mirroring _wait()'s own timeout convention.
+
+    Logs its own start/finish (elapsed time, exit code, line count) at INFO -
+    which lands on the Logs page (webui/log_capture.py captures INFO-or-above
+    app-wide) - so a slow-but-working run and a genuinely stuck one leave a
+    distinguishable trail after the fact, instead of only a generic failure
+    message on the Config page."""
+    start = time.monotonic()
     proc = await asyncio.create_subprocess_exec(
         *args, env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
     )
+    logger.info("Running %s (pid %s)...", " ".join(args), proc.pid)
     lines: list[str] = []
     assert proc.stdout is not None  # always spawned with stdout=PIPE above
     idle_timeout = config.GFMT_BROWSER_APT_IDLE_TIMEOUT_S
@@ -105,7 +114,10 @@ async def _run_with_idle_timeout(
         try:
             line = await asyncio.wait_for(proc.stdout.readline(), timeout=idle_timeout)
         except TimeoutError:
-            logger.warning("%s produced no output for %ss, killing it", args[0], idle_timeout)
+            logger.warning(
+                "%s produced no output for %ss (%.1fs since it started; %d lines seen, last: %r) - killing it",
+                args[0], idle_timeout, time.monotonic() - start, len(lines), lines[-1] if lines else None,
+            )
             await _force_kill(proc)
             return -1, lines
         if not line:
@@ -115,7 +127,12 @@ async def _run_with_idle_timeout(
             lines.append(text)
             if on_line:
                 await on_line(text)
-    return await _wait(proc, timeout=10), lines  # stdout closed -> should exit almost immediately
+    rc = await _wait(proc, timeout=10)  # stdout closed -> should exit almost immediately
+    logger.info(
+        "%s finished in %.1fs with exit code %s (%d lines of output)",
+        args[0], time.monotonic() - start, rc, len(lines),
+    )
+    return rc, lines
 
 
 async def _packages_installed(packages: list[str]) -> bool:
@@ -154,13 +171,24 @@ async def install_x_stack(on_progress: ProgressCallback = _no_progress):
     # here - skip apt entirely instead of paying for an update+install
     # (and a network round-trip) that would just confirm what we already know.
     if await _packages_installed(packages):
+        logger.info("All %d browser-stack packages already installed, skipping apt.", len(packages))
         await on_progress("installing", "X server, VNC tools, and Chrome dependencies already installed.", 35)
         return
 
+    logger.info("Installing %d browser-stack packages via apt: %s", len(packages), ", ".join(packages))
     await on_progress("installing", "Updating package lists...", 5)
     env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
 
-    await _run_with_idle_timeout("apt-get", "update", env=env)
+    update_rc, _ = await _run_with_idle_timeout("apt-get", "update", env=env)
+    if update_rc not in (0, -1):
+        # Not fatal on its own - apt-get install below can still succeed
+        # against a previously-cached index - but worth flagging since it's
+        # the most likely explanation if the install that follows fails too.
+        # (-1 means _run_with_idle_timeout already killed and logged it.)
+        logger.warning(
+            "apt-get update exited with code %s - package lists may be stale for the install that follows",
+            update_rc,
+        )
 
     await on_progress("installing", f"Installing X server and VNC tools... (0/{len(packages)})", 8)
 
@@ -202,6 +230,11 @@ async def install_x_stack(on_progress: ProgressCallback = _no_progress):
             f"container's network access to its package mirror, or a stuck dpkg/apt lock."
         )
     if rc != 0:
+        # The Config page only ever gets the last 10 lines below (see
+        # RuntimeError's message) - log the full transcript at ERROR too, so
+        # a report that only pastes the on-screen error still leaves the
+        # complete run in server logs (the Logs page included) to dig through.
+        logger.error("apt-get install failed (exit code %s); full output:\n%s", rc, "\n".join(output_lines))
         # Surface apt/dpkg's own error text (e.g. "dpkg was interrupted...",
         # a missing/unreachable package, a broken mirror) instead of just
         # "it failed" - that's the only diagnostic a user without a shell
