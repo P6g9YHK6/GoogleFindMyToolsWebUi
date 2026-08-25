@@ -131,6 +131,78 @@ async def test_download_chrome_times_out_with_a_clear_message(monkeypatch, tmp_p
         await browser_stack.download_chrome()
 
 
+class _FakeStdout:
+    """Stands in for a subprocess's StreamReader so _report_apt_progress can
+    readline() over canned output without a real apt-get."""
+
+    def __init__(self, lines: list[str]):
+        self._lines = [f"{line}\n".encode() for line in lines]
+
+    async def readline(self):
+        return self._lines.pop(0) if self._lines else b""
+
+
+class _FakeAptProc(_FakeProc):
+    def __init__(self, returncode, output_lines: list[str]):
+        super().__init__(returncode)
+        self.stdout = _FakeStdout(output_lines)
+
+    async def wait(self):
+        # Neither this nor the fake readline() above ever actually suspends,
+        # so without a real yield here the _report_apt_progress task started
+        # alongside this wait() would never get a turn to drain stdout before
+        # install_x_stack cancels it right after wait() returns.
+        await asyncio.sleep(0)
+        return self.returncode
+
+
+async def test_install_x_stack_runs_dpkg_configure_before_anything_else(monkeypatch):
+    """A prior apt-get install that got killed mid-way (by _wait's own
+    timeout, or the container itself being stopped) leaves dpkg interrupted,
+    and every apt-get call after that fails immediately until 'dpkg
+    --configure -a' runs - see webui/browser_stack.py's _dpkg_configure_pending.
+    That has to happen before even the dpkg -s "is it already installed"
+    check, since an interrupted dpkg can make that check unreliable too."""
+    calls = []
+
+    async def fake_exec(*args, **kwargs):
+        calls.append(args)
+        if args == ("dpkg", "--configure", "-a"):
+            return _FakeProc(0)
+        if args[:2] == ("dpkg", "-s"):
+            return _FakeProc(0)  # already installed -> short-circuits before apt-get
+        raise AssertionError(f"unexpected exec {args}")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    await browser_stack.install_x_stack()
+
+    assert calls[0] == ("dpkg", "--configure", "-a")
+
+
+async def test_install_x_stack_surfaces_apt_gets_own_error_in_the_failure(monkeypatch):
+    """A generic "apt-get install failed" tells a user with no shell into the
+    container nothing actionable - the raised error has to include apt/dpkg's
+    own output so the real cause (a broken mirror, an interrupted dpkg, a
+    missing package) is visible on the Config page itself."""
+    async def fake_exec(*args, **kwargs):
+        if args == ("dpkg", "--configure", "-a"):
+            return _FakeProc(0)
+        if args[:2] == ("dpkg", "-s"):
+            return _FakeProc(1)  # not installed yet -> proceed to apt-get
+        if args[:2] == ("apt-get", "update"):
+            return _FakeProc(0)
+        if args[:2] == ("apt-get", "install"):
+            return _FakeAptProc(100, [
+                "E: dpkg was interrupted, you must manually run 'dpkg --configure -a' to correct the problem.",
+            ])
+        raise AssertionError(f"unexpected exec {args}")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    with pytest.raises(RuntimeError, match="dpkg was interrupted"):
+        await browser_stack.install_x_stack()
+
+
 async def test_start_x_stack_raises_when_a_process_dies_immediately(monkeypatch):
     browser_stack._processes.clear()
 
