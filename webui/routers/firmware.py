@@ -3,8 +3,14 @@ from datetime import datetime
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import FileResponse
 
-from webui import firmware_build, firmware_store, flash_presets, identity_validation, registration_presets
-from webui import tracked_registrations
+from webui import (
+    firmware_build,
+    firmware_store,
+    flash_presets,
+    identity_validation,
+    registration_presets,
+    tracked_registrations,
+)
 from webui.auth_state import is_logged_in
 from webui.firmware_build import REPO_ROOT
 from webui.routers.devices import device_type_plain_label, get_devices
