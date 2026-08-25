@@ -18,6 +18,14 @@ GFMT_BROWSER_IDLE_TIMEOUT_S = int(os.environ.get("GFMT_BROWSER_IDLE_TIMEOUT_S", 
 # hangs the whole sign-in flow forever with no error, since urlretrieve has no
 # timeout of its own.
 GFMT_BROWSER_DOWNLOAD_TIMEOUT_S = int(os.environ.get("GFMT_BROWSER_DOWNLOAD_TIMEOUT_S", "300"))
+# Bounds how long apt-get update/install and dpkg --configure -a
+# (webui/browser_stack.py's install_x_stack) can go with zero new output
+# before being treated as stuck and killed - not how long the whole thing is
+# allowed to take. ~19 packages plus transitive deps can legitimately run
+# well past any single fixed deadline on a slow disk or mirror as long as
+# it's still producing "Unpacking"/"Setting up" lines; this only fires if it
+# goes fully quiet (a dead mirror, a stuck dpkg lock) for this long.
+GFMT_BROWSER_APT_IDLE_TIMEOUT_S = int(os.environ.get("GFMT_BROWSER_APT_IDLE_TIMEOUT_S", "300"))
 DEFAULT_POLL_INTERVAL_S = int(os.environ.get("DEFAULT_POLL_INTERVAL_S", "300"))
 # How long a device-list fetch (Nova's slow device-list call, see
 # NovaApi/ListDevices/nbe_list_devices.py's request_device_list()) is reused
