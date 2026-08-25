@@ -33,8 +33,11 @@ CHROME_DEPS = [
     "libpango-1.0-0", "libpangocairo-1.0-0", "libx11-xcb1", "libxcomposite1",
     "libxdamage1", "libxfixes3", "libxkbcommon0", "libxrandr2", "xdg-utils",
 ]
-# Bounds every apt-get/pkill call so a stuck lock, dead mirror, or hung
-# process can never wedge the whole provisioning/teardown flow forever.
+# Default _wait() fallback for the handful of genuinely-quick calls that
+# don't bother passing their own explicit timeout below. Every apt/dpkg call
+# (the ones that can legitimately run long) uses _run_with_idle_timeout
+# instead - see its own docstring for why a flat deadline doesn't work for
+# those.
 _SUBPROCESS_TIMEOUT_S = 180
 
 _processes: dict[str, asyncio.subprocess.Process] = {}
@@ -53,6 +56,16 @@ def _runtime_dir() -> str:
     return d
 
 
+async def _force_kill(proc: asyncio.subprocess.Process):
+    """Kills a process and reaps it, swallowing the race where it's already
+    exited by the time we get here."""
+    try:
+        proc.kill()
+    except ProcessLookupError:
+        pass
+    await proc.wait()
+
+
 async def _wait(proc: asyncio.subprocess.Process, timeout: float = _SUBPROCESS_TIMEOUT_S) -> int:
     """Waits for a subprocess with a hard timeout, killing it if it hangs,
     instead of letting a stuck apt lock/pkill/etc. block forever."""
@@ -60,56 +73,49 @@ async def _wait(proc: asyncio.subprocess.Process, timeout: float = _SUBPROCESS_T
         return await asyncio.wait_for(proc.wait(), timeout=timeout)
     except TimeoutError:
         logger.warning("Subprocess timed out after %ss, killing it", timeout)
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-        await proc.wait()
+        await _force_kill(proc)
         return -1
 
 
-async def _report_apt_progress(
-    proc: asyncio.subprocess.Process, packages: list[str], on_progress: ProgressCallback
-) -> list[str]:
-    """Turns apt's "Setting up <pkg>" lines into incremental phase updates, so
-    a ~20-package install doesn't just sit on one static message for the
-    better part of a minute. Runs concurrently with _wait(proc) below, since
-    something has to keep draining stdout or apt can deadlock writing to a
-    full pipe once its output outgrows the OS pipe buffer.
+async def _run_with_idle_timeout(
+    *args: str, env: dict[str, str], on_line: Callable[[str], Awaitable[None]] | None = None
+) -> tuple[int, list[str]]:
+    """Runs a subprocess, killing it only if it goes
+    config.GFMT_BROWSER_APT_IDLE_TIMEOUT_S seconds without producing a single
+    new line of output - not if the whole thing just runs long. Installing
+    ~19 packages plus transitive deps can legitimately take far longer than
+    any one fixed deadline on a slow disk or mirror as long as it's still
+    working (each "Unpacking"/"Setting up <pkg>" line is a discrete "still
+    alive" signal); what actually needs catching is a stuck dpkg lock or dead
+    mirror that goes completely silent, which this catches within one idle
+    window instead of guessing a total duration that's either too short for
+    a slow machine or too long for a genuinely stuck one. Also used for
+    apt-get update and dpkg --configure -a, which can go quiet the same way.
 
-    Also returns every line seen, so a failed install can report *why* -
-    apt/dpkg's own error text - instead of just "it failed", which otherwise
-    leaves the user with no way to diagnose it short of a shell in the
-    container."""
-    total = len(packages)
-    installed = 0
-    base_percent, cap_percent = 8, 33
+    Returns every line seen (mainly so a failure can quote apt/dpkg's own
+    error text) and the real exit code - or -1 if it had to be killed for
+    going quiet, mirroring _wait()'s own timeout convention."""
+    proc = await asyncio.create_subprocess_exec(
+        *args, env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+    )
     lines: list[str] = []
-    assert proc.stdout is not None  # the only caller always passes stdout=PIPE
-    try:
-        while True:
-            line = await proc.stdout.readline()
-            if not line:
-                break
-            text = line.decode(errors="replace").strip()
-            if text:
-                lines.append(text)
-            if text.startswith("Setting up "):
-                installed += 1
-                # "Setting up libgtk-3-0:amd64 (3.24.38-2ubuntu1) ..." -> "libgtk-3-0"
-                name = text[len("Setting up "):].split(" ", 1)[0].split(":")[0]
-                # Transitive dependencies not in our own list also print a
-                # "Setting up" line, so `installed` can exceed `total` - clamp
-                # both the percent and the displayed counter for that case.
-                percent = min(base_percent + round(installed / total * (cap_percent - base_percent)), cap_percent)
-                await on_progress(
-                    "installing",
-                    f"Installing X server and VNC tools... ({min(installed, total)}/{total}: {name})",
-                    percent,
-                )
-    except asyncio.CancelledError:
-        pass
-    return lines
+    assert proc.stdout is not None  # always spawned with stdout=PIPE above
+    idle_timeout = config.GFMT_BROWSER_APT_IDLE_TIMEOUT_S
+    while True:
+        try:
+            line = await asyncio.wait_for(proc.stdout.readline(), timeout=idle_timeout)
+        except TimeoutError:
+            logger.warning("%s produced no output for %ss, killing it", args[0], idle_timeout)
+            await _force_kill(proc)
+            return -1, lines
+        if not line:
+            break
+        text = line.decode(errors="replace").strip()
+        if text:
+            lines.append(text)
+            if on_line:
+                await on_line(text)
+    return await _wait(proc, timeout=10), lines  # stdout closed -> should exit almost immediately
 
 
 async def _packages_installed(packages: list[str]) -> bool:
@@ -133,12 +139,10 @@ async def _dpkg_configure_pending():
     many times it's retried. There's no shell into the container to run that
     by hand, so do it ourselves, unconditionally, before every install
     attempt - it's a fast no-op when dpkg has nothing pending."""
-    proc = await asyncio.create_subprocess_exec(
+    await _run_with_idle_timeout(
         "dpkg", "--configure", "-a",
         env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"},
-        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
     )
-    await _wait(proc)
 
 
 async def install_x_stack(on_progress: ProgressCallback = _no_progress):
@@ -156,25 +160,47 @@ async def install_x_stack(on_progress: ProgressCallback = _no_progress):
     await on_progress("installing", "Updating package lists...", 5)
     env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
 
-    proc = await asyncio.create_subprocess_exec(
-        "apt-get", "update",
-        env=env, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-    )
-    await _wait(proc)
+    await _run_with_idle_timeout("apt-get", "update", env=env)
 
     await on_progress("installing", f"Installing X server and VNC tools... (0/{len(packages)})", 8)
 
-    proc = await asyncio.create_subprocess_exec(
-        "apt-get", "install", "-y", "--no-install-recommends", *packages,
-        env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+    # Turns apt's "Setting up <pkg>" lines into incremental phase updates, so
+    # a ~20-package install doesn't just sit on one static message for the
+    # better part of a minute.
+    total = len(packages)
+    installed = 0
+    base_percent, cap_percent = 8, 33
+
+    async def _on_line(text: str):
+        nonlocal installed
+        if not text.startswith("Setting up "):
+            return
+        installed += 1
+        # "Setting up libgtk-3-0:amd64 (3.24.38-2ubuntu1) ..." -> "libgtk-3-0"
+        name = text[len("Setting up "):].split(" ", 1)[0].split(":")[0]
+        # Transitive dependencies not in our own list also print a "Setting
+        # up" line, so `installed` can exceed `total` - clamp both the
+        # percent and the displayed counter for that case.
+        percent = min(base_percent + round(installed / total * (cap_percent - base_percent)), cap_percent)
+        await on_progress(
+            "installing",
+            f"Installing X server and VNC tools... ({min(installed, total)}/{total}: {name})",
+            percent,
+        )
+
+    rc, output_lines = await _run_with_idle_timeout(
+        "apt-get", "install", "-y", "--no-install-recommends", *packages, env=env, on_line=_on_line,
     )
-    progress_task = asyncio.create_task(_report_apt_progress(proc, packages, on_progress))
-    rc = await _wait(proc)
-    progress_task.cancel()
-    try:
-        output_lines = await progress_task
-    except asyncio.CancelledError:
-        output_lines = []
+    if rc == -1:
+        # _run_with_idle_timeout's own timeout, not an apt-get failure - the
+        # tail of output here is just whatever apt happened to be unpacking
+        # at the moment it went quiet, not an error, so say that plainly
+        # instead of showing it as if it were one.
+        raise RuntimeError(
+            f"apt-get install of xvfb/x11vnc/novnc/websockify/chrome-deps produced no output for "
+            f"{config.GFMT_BROWSER_APT_IDLE_TIMEOUT_S}s and was killed as stuck - check the "
+            f"container's network access to its package mirror, or a stuck dpkg/apt lock."
+        )
     if rc != 0:
         # Surface apt/dpkg's own error text (e.g. "dpkg was interrupted...",
         # a missing/unreachable package, a broken mirror) instead of just
