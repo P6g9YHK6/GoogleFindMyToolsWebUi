@@ -68,15 +68,23 @@ async def _wait(proc: asyncio.subprocess.Process, timeout: float = _SUBPROCESS_T
         return -1
 
 
-async def _report_apt_progress(proc: asyncio.subprocess.Process, packages: list[str], on_progress: ProgressCallback):
+async def _report_apt_progress(
+    proc: asyncio.subprocess.Process, packages: list[str], on_progress: ProgressCallback
+) -> list[str]:
     """Turns apt's "Setting up <pkg>" lines into incremental phase updates, so
     a ~20-package install doesn't just sit on one static message for the
     better part of a minute. Runs concurrently with _wait(proc) below, since
     something has to keep draining stdout or apt can deadlock writing to a
-    full pipe once its output outgrows the OS pipe buffer."""
+    full pipe once its output outgrows the OS pipe buffer.
+
+    Also returns every line seen, so a failed install can report *why* -
+    apt/dpkg's own error text - instead of just "it failed", which otherwise
+    leaves the user with no way to diagnose it short of a shell in the
+    container."""
     total = len(packages)
     installed = 0
     base_percent, cap_percent = 8, 33
+    lines: list[str] = []
     assert proc.stdout is not None  # the only caller always passes stdout=PIPE
     try:
         while True:
@@ -84,6 +92,8 @@ async def _report_apt_progress(proc: asyncio.subprocess.Process, packages: list[
             if not line:
                 break
             text = line.decode(errors="replace").strip()
+            if text:
+                lines.append(text)
             if text.startswith("Setting up "):
                 installed += 1
                 # "Setting up libgtk-3-0:amd64 (3.24.38-2ubuntu1) ..." -> "libgtk-3-0"
@@ -99,6 +109,7 @@ async def _report_apt_progress(proc: asyncio.subprocess.Process, packages: list[
                 )
     except asyncio.CancelledError:
         pass
+    return lines
 
 
 async def _packages_installed(packages: list[str]) -> bool:
@@ -113,8 +124,27 @@ async def _packages_installed(packages: list[str]) -> bool:
     return rc == 0
 
 
+async def _dpkg_configure_pending():
+    """A previous apt-get install that got killed partway through - by
+    _wait()'s own timeout, or by the container itself being stopped/OOM-killed
+    mid-install - leaves dpkg in an "interrupted" state, where every apt-get
+    call afterwards fails immediately with "dpkg was interrupted, you must
+    manually run 'dpkg --configure -a' to correct the problem", no matter how
+    many times it's retried. There's no shell into the container to run that
+    by hand, so do it ourselves, unconditionally, before every install
+    attempt - it's a fast no-op when dpkg has nothing pending."""
+    proc = await asyncio.create_subprocess_exec(
+        "dpkg", "--configure", "-a",
+        env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"},
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+    )
+    await _wait(proc)
+
+
 async def install_x_stack(on_progress: ProgressCallback = _no_progress):
     packages = [*X_PACKAGES, *CHROME_DEPS]
+    await _dpkg_configure_pending()
+
     # teardown() no longer purges these (see its docstring), so on every
     # attempt after the first in a container's lifetime they're already
     # here - skip apt entirely instead of paying for an update+install
@@ -142,11 +172,17 @@ async def install_x_stack(on_progress: ProgressCallback = _no_progress):
     rc = await _wait(proc)
     progress_task.cancel()
     try:
-        await progress_task
+        output_lines = await progress_task
     except asyncio.CancelledError:
-        pass
+        output_lines = []
     if rc != 0:
-        raise RuntimeError("apt-get install of xvfb/x11vnc/novnc/websockify/chrome-deps failed")
+        # Surface apt/dpkg's own error text (e.g. "dpkg was interrupted...",
+        # a missing/unreachable package, a broken mirror) instead of just
+        # "it failed" - that's the only diagnostic a user without a shell
+        # into the container has to go on.
+        tail = "\n".join(output_lines[-10:])
+        detail = f": {tail}" if tail else ""
+        raise RuntimeError(f"apt-get install of xvfb/x11vnc/novnc/websockify/chrome-deps failed{detail}")
 
     await on_progress("installing", "X server and VNC tools installed.", 35)
 
