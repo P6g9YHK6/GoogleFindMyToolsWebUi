@@ -65,6 +65,8 @@ def resolve_tracked_status(entries: list[dict], devices: list[dict]) -> list[dic
     results = []
     for entry in entries:
         matches = [device for device in devices if _matches(entry, device)]
+        status: str
+        extra: dict[str, object]
         if not matches:
             status, extra = "not_found", {}
         elif len(matches) == 1:
