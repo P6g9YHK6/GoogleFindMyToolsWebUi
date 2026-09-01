@@ -31,67 +31,48 @@ __all__ = [
 DEFAULT_MIN_MOVEMENT_M = 50
 DEFAULT_MIN_UPDATE_GAP_M = 30
 DEFAULT_MAX_ACCURACY_M = 100
-# The statuses a location can carry (see Common.proto's Status enum) - the
-# three real fix-quality values plus SEMANTIC, a named-location reading
-# rather than a GPS/WiFi/cellular fix (see webui/forwarders/semantic_map.py).
-# Order matches roughly-best-to-worst, for the settings UI's checkbox list,
-# with SEMANTIC last since it isn't a quality tier at all.
+# Common.proto's Status enum plus SEMANTIC (a named-location reading, not a
+# GPS/WiFi/cellular fix - see semantic_map.py). Roughly best-to-worst, for
+# the settings UI's checkbox list.
 STATUS_CHOICES: list[tuple[str, str]] = [
     ("LAST_KNOWN", "GPS"),
     ("CROWDSOURCED", "WiFi/Cellular"),
     ("AGGREGATED", "Coarse/low-accuracy"),
     ("SEMANTIC", "Named location"),
 ]
-# A fix this recent is treated as a genuinely live update rather than Google
-# re-serving the same stale cached report - always sent regardless of the
-# stale-duplicate gate below.
+# A fix this recent is a live update, not Google re-serving a stale cached
+# report - always sent regardless of the stale-duplicate gate below.
 FRESH_FIX_AGE_S = 120
-# After this many consecutive failed attempts, escalate a destination's
-# ongoing failures via logger.error (picked up by the System Log and, if
-# configured, Apprise - see webui/notify.py) rather than leaving it visible
-# only to whoever happens to check the Forwarding Log. Repeats every further
-# multiple of this instead of once, so a destination that's been down for
-# days still gets an occasional reminder instead of one message that scrolls
-# off and is never mentioned again.
+# Escalates a destination's ongoing failures via logger.error every Nth
+# consecutive failure (picked up by the System Log/Apprise), instead of only
+# ever showing in the Forwarding Log.
 FORWARD_FAILURE_ESCALATION_THRESHOLD = 3
+
+# Six per-endpoint skip gates below, each reading its own toggle off
+# endpoint_cfg. skip_if_close/skip_if_stale/filter_by_status/skip_if_inaccurate
+# default to *off* when absent; skip_if_already_seen/only_most_recent default
+# to *on* - see webui/routers/settings.py's parse_endpoints_form. A semantic
+# reading with no mapped coordinates has no latitude and skips every
+# distance/accuracy-based gate automatically; one with mapped coordinates is
+# treated the same as a real fix throughout.
 
 
 def _skip_already_seen(endpoint_cfg: dict, already_seen: bool) -> bool:
-    """True if this reading was already reported by Google in an earlier
-    fetch (see webui/device_location_store.py's first_seen tracking) and
-    this endpoint hasn't opted out of skipping those.
-
-    Unlike skip_if_close/skip_if_stale below, this one defaults to *on*
-    when the endpoint has no skip_if_already_seen key at all - so
-    "explicitly turned off" has to be persisted as skip_if_already_seen:
-    False rather than represented by the key's mere absence (which is how
-    the other two toggles represent "off" - see
-    webui/routers/settings.py's _parse_endpoints_form)."""
+    """This reading was already reported by Google in an earlier fetch (see
+    device_location_store.py's first_seen tracking), not a new observation."""
     return already_seen and endpoint_cfg.get("skip_if_already_seen", True)
 
 
 def _skip_not_most_recent(endpoint_cfg: dict, is_most_recent: bool) -> bool:
-    """True if this endpoint's "only send the most recent reading" toggle is
-    on (default) and this location isn't the one with the latest "time" in
-    this fetch's whole batch - Google can return several readings in one
-    response (see decrypt_locations.py), and most endpoints only care about
-    the newest one, not every point in the batch.
-
-    Same on-by-default convention as _skip_already_seen above - "off" has
-    to be a persisted only_most_recent: False, not mere absence of the
-    key."""
+    """Not the reading with the latest "time" in this fetch's batch - Google
+    can return several in one response, and most endpoints only want the
+    newest."""
     return not is_most_recent and endpoint_cfg.get("only_most_recent", True)
 
 
 def _too_close_to_bother(endpoint_cfg: dict, location: dict) -> bool:
-    """True if this endpoint's "skip if it hasn't moved" toggle is on and the
-    new fix is under its configured minimum-movement threshold from the last
-    position actually sent - see webui/geo.py for the (local, API-free)
-    distance calculation. Applies the same way to a SEMANTIC reading with
-    mapped coordinates (see webui/forwarders/semantic_map.py) as to a real
-    fix - once it has a latitude, "hasn't moved" means the same thing either
-    way. An unmapped semantic reading still has no latitude and skips this
-    gate entirely, same as before."""
+    """Under the configured minimum-movement threshold from the last
+    position actually sent (see webui/geo.py)."""
     if not endpoint_cfg.get("skip_if_close"):
         return False
     if location.get("latitude") is None:
@@ -104,17 +85,9 @@ def _too_close_to_bother(endpoint_cfg: dict, location: dict) -> bool:
 
 
 def _stale_duplicate(endpoint_cfg: dict, location: dict, now: float | None = None) -> bool:
-    """True if this endpoint's "skip if it hasn't been updated" toggle is on
-    and the new fix is (a) not fresh/live and (b) within its configured
+    """Not fresh/live (see FRESH_FIX_AGE_S) and within the configured
     minimum-update-gap of the last fix's own timestamp actually sent - i.e.
-    Google is just re-serving the same stale cached report again, not a new
-    update. A genuinely live fix (recorded within FRESH_FIX_AGE_S of now)
-    always bypasses this and gets sent regardless. Applies the same way to a
-    SEMANTIC reading with mapped coordinates (see
-    webui/forwarders/semantic_map.py) as to a real fix. An unmapped semantic
-    reading (is_semantic, no latitude) skips this gate entirely, same as
-    before - checked via latitude rather than is_semantic alone so a mapped
-    one isn't accidentally caught by the same exemption."""
+    Google re-serving the same stale report, not a new one."""
     if not endpoint_cfg.get("skip_if_stale"):
         return False
     if location.get("is_semantic") and location.get("latitude") is None:
@@ -132,28 +105,19 @@ def _stale_duplicate(endpoint_cfg: dict, location: dict, now: float | None = Non
 
 
 def _skip_blocked_status(endpoint_cfg: dict, location: dict) -> bool:
-    """True if this endpoint has "filter by report type" turned on and this
-    reading's status is one of the fix types unchecked there. filter_by_status
-    off (the default) means the per-type checkboxes are hidden in the
-    settings UI and never consulted, regardless of what blocked_statuses
-    holds - same absence-means-off convention as skip_if_close/skip_if_stale
-    above. A semantic reading's status is always "SEMANTIC" (see
-    decrypt_locations.py) - checked against blocked_statuses the same
-    uniform way as the three real fix-quality values (see STATUS_CHOICES),
-    so unchecking "Named location" there blocks it like any other type."""
+    """This reading's status is one of the fix types unchecked in this
+    endpoint's "filter by report type" list. A semantic reading's status is
+    always "SEMANTIC" - checked the same way as any other type."""
     if not endpoint_cfg.get("filter_by_status"):
         return False
     return location.get("status") in (endpoint_cfg.get("blocked_statuses") or [])
 
 
 def _skip_not_own_report(endpoint_cfg: dict, location: dict) -> bool:
-    """True if this endpoint's "only send this tracker's own GPS reports"
-    toggle is on and this fix is crowdsourced from a nearby device instead
-    of the tracker's own (see own_report in webui/forwarders/custom.py's
-    build_context). Always bypassed for a semantic reading, mapped
-    coordinates or not - is_own_report is hardcoded True at decode time for
-    every SEMANTIC result (see decrypt_locations.py), so it's never a real
-    signal to filter on."""
+    """Crowdsourced from a nearby device, not the tracker's own GPS (see
+    own_report in custom.py's build_context). Always bypassed for a semantic
+    reading - is_own_report is hardcoded True for those at decode time, so
+    it's never a real signal there."""
     if not endpoint_cfg.get("skip_if_not_own_report"):
         return False
     if location.get("is_semantic"):
@@ -162,15 +126,9 @@ def _skip_not_own_report(endpoint_cfg: dict, location: dict) -> bool:
 
 
 def _skip_inaccurate(endpoint_cfg: dict, location: dict) -> bool:
-    """True if this endpoint's "skip if accuracy is worse than" toggle is on
-    and Google's own accuracy_m radius for this fix exceeds the configured
-    threshold - a wider radius means a less precise fix, independent of
-    what status flag it carries (status and accuracy_m are correlated but
-    not the same signal - this gate lets accuracy be filtered on directly,
-    same shape as _too_close_to_bother's min_movement_m above). Always
-    bypassed for a semantic reading, mapped coordinates or not -
-    accuracy is hardcoded 0 at decode time for every SEMANTIC result (see
-    decrypt_locations.py), so it's never a real signal to filter on."""
+    """Google's own accuracy_m radius exceeds the configured threshold.
+    Always bypassed for a semantic reading - accuracy is hardcoded 0 for
+    those at decode time, so it's never a real signal there."""
     if not endpoint_cfg.get("skip_if_inaccurate"):
         return False
     if location.get("is_semantic") or location.get("accuracy") is None:
@@ -183,15 +141,9 @@ def _dispatch_forward(
     endpoint_cfg: dict, location: dict, device_name: str = "", device_alias: str | None = None,
     tracker_id: str = "", device_meta: dict | None = None, response_out: dict | None = None,
 ) -> str:
-    """Sends this endpoint's request, with no distance-skip check - used both
-    by the normal scheduled path (after it passes _too_close_to_bother) and
-    by the "send now" button, which is meant to bypass that check entirely.
-    Every endpoint goes through the same generic templated request (see
-    webui/forwarders/custom.py); Traccar/PhoneTrack are presets that pre-fill
-    it, not separate code paths - see webui/forwarders/presets.py.
-
-    response_out is just threaded straight through to forward_to_custom - see
-    its own docstring."""
+    """Sends this endpoint's request with no distance/staleness gate - used
+    both by the scheduled path (after it passes those) and "send now", which
+    bypasses them entirely."""
     try:
         ok = forward_to_custom(endpoint_cfg, location, device_name, device_alias, tracker_id, device_meta, response_out)
         return "ok" if ok else "skipped"
@@ -205,15 +157,9 @@ def _forward_one(
     tracker_id: str = "", device_meta: dict | None = None,
     already_seen: bool = False, is_most_recent: bool = True, response_out: dict | None = None,
 ) -> str:
-    """already_seen is True when this exact reading (see
-    device_location_store._location_key) was already present in an earlier
-    fetch - Google re-serving something we've already handled, not a new
-    observation. is_most_recent is False when this location's "time" isn't
-    the latest one in this fetch's whole batch (see webui/scheduler.py,
-    which computes both once per batch before calling this per location).
-    Both checked first since, unlike the two gates below, whether they skip
-    only depends on that one flag plus this endpoint's own toggle - no
-    distance/timing math needed."""
+    """already_seen/is_most_recent are computed once per batch by
+    webui/scheduler.py and passed in - checked first since, unlike the gates
+    below, they need no distance/timing math."""
     if _skip_already_seen(endpoint_cfg, already_seen):
         return "skipped: already reported by Google (not a new reading)"
     if _skip_not_most_recent(endpoint_cfg, is_most_recent):
@@ -236,8 +182,7 @@ def _forward_one(
 
 def _serialize_location(location: dict) -> str:
     """The exact location data a forward attempt worked with, for the
-    forwarding log - so a bad reading (or a forwarder silently dropping a
-    field) is visible there instead of just the short target summary."""
+    forwarding log."""
     try:
         return json.dumps(location, default=str)
     except TypeError:
@@ -245,12 +190,10 @@ def _serialize_location(location: dict) -> str:
 
 
 def _format_response_for_log(response_out: dict) -> str:
-    """response_out (see _dispatch_forward/forward_to_custom) as one string
-    for the Forwarding Log's Response column - blank when nothing was ever
-    received (a skip, or a connection-level failure with no response body
-    at all). A destination answering 200 while silently rejecting the point
-    (PhoneTrack et al. can do this) looks identical to a real success in the
-    Status column alone - this is what actually shows the difference."""
+    """response_out as one string for the Forwarding Log's Response column -
+    blank on a skip or connection-level failure. Distinguishes a destination
+    that answers 200 while silently rejecting the point from a real success,
+    which the Status column alone can't."""
     if not response_out:
         return ""
     return f"{response_out.get('status_code', '')}: {response_out.get('body', '')}"
@@ -279,13 +222,10 @@ def _redacted_endpoint_target(endpoint_cfg: dict) -> str:
 def _record_forward_result(
     endpoint_cfg: dict, status: str, location: dict | None, device_display_name: str, now_ts: int | None = None,
 ):
-    """Updates one endpoint's persisted last-forward state after a single
-    attempt (used by both the cron poll loop and "send now"), and escalates
-    via logger.error once it's crossed FORWARD_FAILURE_ESCALATION_THRESHOLD
-    consecutive failures - see that constant's comment. A "skipped" status
-    (the distance/staleness gates, or simply nothing to send) is neither
-    success nor failure, so it's left out of the streak entirely rather than
-    resetting or extending it."""
+    """Updates one endpoint's persisted last-forward state after an attempt,
+    and escalates via logger.error every FORWARD_FAILURE_ESCALATION_THRESHOLD
+    consecutive failures. A "skipped" status is neither success nor failure,
+    so it doesn't touch the streak."""
     endpoint_cfg["last_forward_status"] = status
     endpoint_cfg["last_forward_time"] = now_ts if now_ts is not None else int(time.time())
 
