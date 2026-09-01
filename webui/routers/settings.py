@@ -5,7 +5,7 @@ from croniter import croniter
 from fastapi import APIRouter, Form, HTTPException, Request
 
 from webui import demo_mode, scheduler
-from webui.auth_state import is_logged_in
+from webui.auth_state import login_required
 from webui.forwarders import (
     BUILTIN_VARIABLES_FROM_APP,
     BUILTIN_VARIABLES_FROM_FIX,
@@ -21,14 +21,8 @@ from webui.templating import templates
 
 router = APIRouter()
 
-# The client-side preset switcher (endpoint_fields.js) needs the same preset
-# data the form itself was rendered with - embedded once as JSON rather than
-# duplicated by hand in the JS file, so the two can't drift apart. Escaping
-# "</" defensively guards against a preset value that happens to contain
-# "</script" ending the block early - see forwarding.html's <script type=
-# "application/json"> tag, which must not be HTML-escaped (its content is
-# read back as raw JSON text, not markup) or this substitution would be
-# pointless.
+# "</" escaped so a preset value containing "</script" can't end the
+# forwarding.html <script> block early.
 _PRESETS_JSON = json.dumps(PRESETS).replace("</", "<\\/")
 
 _TEMPLATE_CONTEXT = {
@@ -41,145 +35,120 @@ _TEMPLATE_CONTEXT = {
 
 
 @router.get("/settings")
+@login_required
 async def settings_page(request: Request):
-    if not is_logged_in():
-        return templates.TemplateResponse(request, "_not_signed_in.html", {})
     return templates.TemplateResponse(request, "settings/forwarding.html", {
         "rows": await settings_service.rows(), **_TEMPLATE_CONTEXT,
     })
 
 
-@router.get("/settings/devices/{canonic_id}")
-async def device_form_route(request: Request, canonic_id: str):
-    """Re-renders just the structured form from whatever's on disk - kept
-    around as a plain "load the saved config" route, though the "Edit as
-    form" button no longer uses it (see device_form_preview_route below,
-    which reflects not-yet-saved YAML edits instead)."""
-    if not is_logged_in():
-        return templates.TemplateResponse(request, "_not_signed_in.html", {})
-    row = await settings_service.row(canonic_id)
-    return templates.TemplateResponse(request, "settings/_device_form.html", {
-        "row": row, **_TEMPLATE_CONTEXT,
+def _form_response(request, row):
+    return templates.TemplateResponse(request, "settings/_device_form.html", {"row": row, **_TEMPLATE_CONTEXT})
+
+
+def _yaml_response(request, canonic_id, name, google_name, alias, yaml_text, label_variables, error=None):
+    return templates.TemplateResponse(request, "settings/_device_yaml.html", {
+        "canonic_id": canonic_id, "name": name, "google_name": google_name, "alias": alias,
+        "yaml_text": yaml_text, "label_variables": label_variables, "error": error, **_TEMPLATE_CONTEXT,
     })
 
 
+@router.get("/settings/devices/{canonic_id}")
+@login_required
+async def device_form_route(request: Request, canonic_id: str):
+    """Loads the saved config as the structured form - the "Edit as form"
+    button uses device_form_preview_route below instead, to keep unsaved
+    edits."""
+    row = await settings_service.row(canonic_id)
+    return _form_response(request, row)
+
+
 @router.get("/settings/devices/{canonic_id}/yaml")
+@login_required
 async def device_yaml_route(request: Request, canonic_id: str):
-    """Plain "load the saved config as YAML" route - the "Edit as YAML"
-    button no longer uses this either (see device_yaml_preview_route
-    below), for the same reason as device_form_route above."""
-    if not is_logged_in():
-        return templates.TemplateResponse(request, "_not_signed_in.html", {})
+    """Loads the saved config as YAML - the "Edit as YAML" button uses
+    device_yaml_preview_route below instead, to keep unsaved edits."""
     row = await settings_service.row(canonic_id)
     yaml_text = yaml.safe_dump(
         settings_service.to_yaml_doc(row["config"].get("display_name", ""), row["config"].get("endpoints", [])),
         sort_keys=False, allow_unicode=True,
     )
-    return templates.TemplateResponse(request, "settings/_device_yaml.html", {
-        "canonic_id": canonic_id, "name": row["name"], "google_name": row["google_name"],
-        "alias": row["config"].get("display_name") or "", "yaml_text": yaml_text,
-        "label_variables": row["label_variables"], **_TEMPLATE_CONTEXT,
-    })
+    return _yaml_response(
+        request, canonic_id, row["name"], row["google_name"],
+        row["config"].get("display_name") or "", yaml_text, row["label_variables"],
+    )
 
 
 @router.post("/settings/devices/{canonic_id}/yaml/preview")
+@login_required
 async def device_yaml_preview_route(request: Request, canonic_id: str, display_name: str = Form("")):
-    """The "Edit as YAML" button's actual target: converts the form's
-    current field values - including whatever's been typed but not yet
-    saved - into YAML, entirely in memory. Switching views this way never
-    needs a Save first and never throws unsaved edits away by re-reading
-    the last-saved config instead (which is all the plain GET above could
-    do)."""
-    if not is_logged_in():
-        return templates.TemplateResponse(request, "_not_signed_in.html", {})
-
+    """The "Edit as YAML" button's target: renders the form's current,
+    not-yet-saved field values as YAML, entirely in memory."""
     form = await request.form()
     existing = config_store.get_device_config(canonic_id) or {"endpoints": []}
     endpoints, _errors = settings_service.parse_endpoints_form(form, existing.get("endpoints", []))
     yaml_text = yaml.safe_dump(settings_service.to_yaml_doc(display_name, endpoints), sort_keys=False, allow_unicode=True)
-    # The heading is always the fixed Google name (falling back to the
-    # just-typed alias, then canonic_id, only when google_name is itself
-    # unknown) - same rule as _device_form.html's own legend. The alias
-    # shows too, small, next to it - see _device_yaml.html.
     google_name = existing.get("google_name") or ""
     name = google_name or display_name.strip() or canonic_id
-    return templates.TemplateResponse(request, "settings/_device_yaml.html", {
-        "canonic_id": canonic_id, "name": name, "google_name": google_name, "alias": display_name.strip(),
-        "yaml_text": yaml_text,
-        "label_variables": device_label_variables(existing.get("device_meta")), **_TEMPLATE_CONTEXT,
-    })
+    return _yaml_response(
+        request, canonic_id, name, google_name, display_name.strip(), yaml_text,
+        device_label_variables(existing.get("device_meta")),
+    )
 
 
 @router.post("/settings/devices/{canonic_id}/form/preview")
+@login_required
 async def device_form_preview_route(request: Request, canonic_id: str, yaml_text: str = Form(...)):
-    """The YAML view's "Edit as form" button's actual target - the mirror
-    image of device_yaml_preview_route above: parses whatever's currently
-    typed in the YAML textarea - including its display_name - back into
-    the form, without saving it."""
-    if not is_logged_in():
-        return templates.TemplateResponse(request, "_not_signed_in.html", {})
-
+    """The "Edit as form" button's target: parses the YAML textarea's
+    current content back into the form, without saving it."""
     existing = config_store.get_device_config(canonic_id) or {}
     endpoints, display_name, error = settings_service.from_yaml_doc(yaml_text)
     if error:
         google_name = existing.get("google_name") or ""
         name = google_name or existing.get("display_name") or canonic_id
-        return templates.TemplateResponse(request, "settings/_device_yaml.html", {
-            "canonic_id": canonic_id, "name": name, "google_name": google_name,
-            "alias": existing.get("display_name") or "", "yaml_text": yaml_text,
-            "error": error, "label_variables": device_label_variables(existing.get("device_meta")), **_TEMPLATE_CONTEXT,
-        })
+        return _yaml_response(
+            request, canonic_id, name, google_name, existing.get("display_name") or "", yaml_text,
+            device_label_variables(existing.get("device_meta")), error=error,
+        )
 
     device_cfg = {"display_name": display_name, "endpoints": endpoints}
     row = await settings_service.row(canonic_id, overrides={canonic_id: {"config": device_cfg, "error": None}})
-    return templates.TemplateResponse(request, "settings/_device_form.html", {
-        "row": row, **_TEMPLATE_CONTEXT,
-    })
+    return _form_response(request, row)
 
 
 @router.post("/settings/devices/{canonic_id}/yaml")
+@login_required
 async def save_device_yaml_route(request: Request, canonic_id: str, yaml_text: str = Form(...)):
-    if not is_logged_in():
-        return templates.TemplateResponse(request, "_not_signed_in.html", {})
-
     row = await settings_service.row(canonic_id)
     endpoints, display_name, error = settings_service.from_yaml_doc(yaml_text)
+
+    def _error(msg: str):
+        return _yaml_response(
+            request, canonic_id, row["name"], row["google_name"],
+            row["config"].get("display_name") or "", yaml_text, row["label_variables"], error=msg,
+        )
+
     if error:
-        return templates.TemplateResponse(request, "settings/_device_yaml.html", {
-            "canonic_id": canonic_id, "name": row["name"], "google_name": row["google_name"],
-            "alias": row["config"].get("display_name") or "", "yaml_text": yaml_text,
-            "error": error, "label_variables": row["label_variables"], **_TEMPLATE_CONTEXT,
-        })
+        return _error(error)
 
     # The form path (update_device_settings below) has always rejected an
     # invalid cron rather than saving it - this path let one through
-    # unchecked, silently breaking that endpoint's polling (or the whole
-    # device's, if every endpoint's cron was bad) with no error shown.
+    # unchecked, silently breaking that endpoint's polling.
     cron_errors = [
         f"endpoints[{i}]: \"{ep.get('cron', '')}\" is not a valid cron expression"
         for i, ep in enumerate(endpoints)
         if not croniter.is_valid(str(ep.get("cron", "")))
     ]
     if cron_errors:
-        return templates.TemplateResponse(request, "settings/_device_yaml.html", {
-            "canonic_id": canonic_id, "name": row["name"], "google_name": row["google_name"],
-            "alias": row["config"].get("display_name") or "", "yaml_text": yaml_text,
-            "error": "; ".join(cron_errors), "label_variables": row["label_variables"], **_TEMPLATE_CONTEXT,
-        })
+        return _error("; ".join(cron_errors))
 
-    # google_name isn't part of what this editor shows (see to_yaml_doc) -
-    # carry it forward from what's already on disk instead of losing it.
-    # display_name *is* part of what this editor shows, so whatever was
-    # just typed here is what gets saved, same as the form's own alias
-    # field would.
+    # google_name/device_meta aren't part of what this editor shows (see
+    # to_yaml_doc) - carry both forward from what's already on disk instead
+    # of losing them.
     existing = config_store.get_device_config(canonic_id)
     device_cfg = {"display_name": display_name, "endpoints": endpoints}
     if existing and existing.get("google_name"):
         device_cfg["google_name"] = existing["google_name"]
-    # device_meta isn't part of what this editor shows either (see
-    # to_yaml_doc) - same reason as google_name just above: carry it
-    # forward too, or this device's label_* chips go missing until the
-    # next page load's sync happens to run again.
     if existing and existing.get("device_meta"):
         device_cfg["device_meta"] = existing["device_meta"]
 
@@ -187,34 +156,21 @@ async def save_device_yaml_route(request: Request, canonic_id: str, yaml_text: s
         config_store.set_device_config(canonic_id, device_cfg)
         scheduler.restart_device(canonic_id)
     except Exception as e:
-        return templates.TemplateResponse(request, "settings/_device_yaml.html", {
-            "canonic_id": canonic_id, "name": row["name"], "google_name": row["google_name"],
-            "alias": row["config"].get("display_name") or "", "yaml_text": yaml_text,
-            "error": f"Failed to save: {e}", "label_variables": row["label_variables"], **_TEMPLATE_CONTEXT,
-        })
+        return _error(f"Failed to save: {e}")
     latest_values_store.prune_to_urls(canonic_id, {ep["url"] for ep in endpoints})
 
-    # In demo mode, config_store.set_device_config() above was a no-op (see
-    # webui/device_store.py) - re-reading now would just show the fixed seed
-    # again, not what was just typed. Echo the just-built device_cfg back
-    # instead, for this one response only - same "saved" toast either way.
+    # In demo mode set_device_config() was a no-op - echo back what was just
+    # typed instead of re-reading the fixed seed.
     saved_overrides = {canonic_id: {"config": device_cfg, "error": None}} if demo_mode.is_demo_mode() else None
     fresh_row = await settings_service.row(canonic_id, overrides=saved_overrides, saved=True)
-    return templates.TemplateResponse(request, "settings/_device_form.html", {
-        "row": fresh_row, **_TEMPLATE_CONTEXT,
-    })
+    return _form_response(request, fresh_row)
 
 
 @router.post("/settings/cron-preview")
 async def cron_preview_route(request: Request):
-    """Backs the schedule editor's live "next run" feedback (see
-    _endpoint_fields.html's .cron-raw input, which posts here via
-    hx-include="this"). Reads whatever single field got posted rather than
-    expecting one named "cron" - the real field is namespaced
-    "ep-{idx}-cron" per endpoint (see update_device_settings below), and
-    this route has no reason to care which one. Stateless and device-
-    agnostic, so it works the same whether the endpoint being edited is
-    already saved or a not-yet-submitted "+ Add endpoint" block."""
+    """Live "next run" preview for the schedule editor - reads whatever
+    single field got posted, since the real field name is namespaced
+    per-endpoint ("ep-{idx}-cron")."""
     form = await request.form()
     cron = next(iter(form.values()), "")
     preview = scheduler.cron_preview(str(cron))
@@ -222,18 +178,11 @@ async def cron_preview_route(request: Request):
 
 
 @router.get("/settings/devices/{canonic_id}/endpoints/blank")
+@login_required
 async def blank_endpoint_route(request: Request, canonic_id: str):
-    if not is_logged_in():
-        return templates.TemplateResponse(request, "_not_signed_in.html", {})
-
     blank = new_blank_endpoint(scheduler.DEFAULT_CRON)
-    # Rendered outside the per-device-row loop (same reason as send_now_route
-    # below), so `row` isn't in scope the normal way either - a bare stub
-    # just carrying label_variables lets the "From the location fix" chip
-    # list still reflect this device's real data on a brand-new block. Safe
-    # against the template's only other row-gated behavior (the "Send now"
-    # button) since that's already conditioned on "not is_new" too, and
-    # is_new is always True here.
+    # Rendered outside the per-device-row loop, so `row` is a bare stub
+    # carrying just label_variables for the "From the location fix" chips.
     device_meta = (config_store.get_device_config(canonic_id) or {}).get("device_meta")
     return templates.TemplateResponse(request, "settings/_endpoint_fields.html", {
         "endpoint": blank, "idx": "__NEW__", "is_new": True,
@@ -243,39 +192,29 @@ async def blank_endpoint_route(request: Request, canonic_id: str):
 
 
 @router.post("/settings/devices/{canonic_id}/endpoints/{index}/send-now")
+@login_required
 async def send_now_route(request: Request, canonic_id: str, index: int):
-    if not is_logged_in():
-        return templates.TemplateResponse(request, "_not_signed_in.html", {})
-
     send_error = None
     try:
         endpoint = await scheduler.forward_now(canonic_id, index)
     except Exception as e:
-        # forward_now already turns a failed *send* into a "error: ..."
-        # last_forward_status string (see webui/forwarders/policy.py) - this
-        # only catches a genuine failure to persist that result (e.g. a disk
-        # write error), which would otherwise propagate to an uncaught 500
-        # and leave the button looking like it silently did nothing.
+        # Only a failure to persist the result (e.g. a disk write error) -
+        # forward_now already turns a failed send itself into an "error: ..."
+        # last_forward_status string.
         endpoint = None
         send_error = f"Send failed: {e}"
 
     if endpoint is None:
         if send_error is None:
             raise HTTPException(status_code=404, detail="No such device or endpoint")
-        # Still re-render the block (with whatever's currently saved) so the
-        # error has somewhere to show up, instead of a bare 500.
         device_cfg = config_store.get_device_config(canonic_id) or {}
         endpoints = device_cfg.get("endpoints", [])
         if not (0 <= index < len(endpoints)):
             raise HTTPException(status_code=404, detail="No such device or endpoint")
         endpoint = endpoints[index]
 
-    # Rendered outside the per-device-row loop, so the "Send now" button (which
-    # needs the device id and this endpoint's position) can't rely on `row`/
-    # `loop.index0` being in scope the way the normal page render provides them
-    # - pass both explicitly instead, so the swapped-in fragment can still be
-    # sent again immediately. label_variables is included too so the chip
-    # list still reflects this device's real data after the swap.
+    # Rendered outside the per-device-row loop, so `row`/`idx` aren't in
+    # scope the normal way - pass them explicitly instead.
     device_meta = (config_store.get_device_config(canonic_id) or {}).get("device_meta")
     return templates.TemplateResponse(request, "settings/_endpoint_fields.html", {
         "endpoint": endpoint,
@@ -285,26 +224,18 @@ async def send_now_route(request: Request, canonic_id: str, index: int):
 
 
 @router.post("/settings/devices/{canonic_id}")
+@login_required
 async def update_device_settings(
     request: Request,
     canonic_id: str,
     display_name: str = Form(""),
 ):
-    if not is_logged_in():
-        return templates.TemplateResponse(request, "_not_signed_in.html", {})
-
     form = await request.form()
     existing = config_store.get_device_config(canonic_id) or {"endpoints": []}
     endpoints, errors = settings_service.parse_endpoints_form(form, existing.get("endpoints", []))
 
-    # google_name/device_meta aren't fields this form ever edits (see
-    # settings_service.rows' own Google-sync comment) - carry them forward
-    # from what's already on disk rather than just building
-    # {display_name, endpoints} and letting them go missing until the next
-    # page load's sync happens to run again. Without this, a plain settings
-    # save (e.g. just typing an alias) wiped google_name too, and
-    # {{device_name}} fell back to that alias instead of staying the fixed
-    # Google account name.
+    # google_name/device_meta aren't fields this form edits - carry them
+    # forward from disk, or a plain alias save would wipe them.
     device_cfg = {"display_name": display_name, "endpoints": endpoints}
     if existing.get("google_name"):
         device_cfg["google_name"] = existing["google_name"]
@@ -313,25 +244,18 @@ async def update_device_settings(
 
     if errors:
         row = await settings_service.row(canonic_id, overrides={canonic_id: {"config": device_cfg, "error": "; ".join(errors)}})
-        return templates.TemplateResponse(request, "settings/_device_form.html", {
-            "row": row, **_TEMPLATE_CONTEXT,
-        })
+        return _form_response(request, row)
 
     try:
         config_store.set_device_config(canonic_id, device_cfg)
         scheduler.restart_device(canonic_id)
     except Exception as e:
         row = await settings_service.row(canonic_id, overrides={canonic_id: {"config": device_cfg, "error": f"Failed to save: {e}"}})
-        return templates.TemplateResponse(request, "settings/_device_form.html", {
-            "row": row, **_TEMPLATE_CONTEXT,
-        })
+        return _form_response(request, row)
     latest_values_store.prune_to_urls(canonic_id, {ep["url"] for ep in endpoints})
 
-    # See the matching comment in save_device_yaml_route above - demo mode's
-    # set_device_config() call was a no-op, so echo back what was just typed
-    # instead of re-reading the fixed seed.
+    # In demo mode set_device_config() was a no-op - echo back what was just
+    # typed instead of re-reading the fixed seed.
     saved_overrides = {canonic_id: {"config": device_cfg, "error": None}} if demo_mode.is_demo_mode() else None
     row = await settings_service.row(canonic_id, overrides=saved_overrides, saved=True)
-    return templates.TemplateResponse(request, "settings/_device_form.html", {
-        "row": row, **_TEMPLATE_CONTEXT,
-    })
+    return _form_response(request, row)

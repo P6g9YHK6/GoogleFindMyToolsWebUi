@@ -5,7 +5,7 @@ from fastapi import APIRouter, Request
 from NovaApi.ListDevices.nbe_list_devices import request_device_list
 from ProtoDecoders.decoder import get_device_details, parse_device_list_protobuf
 from webui import demo_data, demo_mode, staleness
-from webui.auth_state import is_logged_in
+from webui.auth_state import login_required
 from webui.deps import run_blocking
 from webui.device_list_cache import device_list_cache
 from webui.forwarders import config_store, latest_values_store
@@ -21,14 +21,8 @@ _TEMPLATE_CONTEXT = {
 
 
 async def _rows() -> list[dict]:
-    """One row per device actually on the account - not just ones already
-    opted into staleness tracking (or even configured for forwarding at
-    all), since turning tracking *on* for a device that's never been
-    touched is the whole point of this page. Same live-device-list-plus-
-    local-overlay shape as webui/routers/settings.py's _rows/webui/routers/
-    devices.py's get_devices - both fetch through the same device_list_cache
-    slot, so this has to ask for the same shape too (see either of those
-    for why)."""
+    """One row per device on the account, not just ones already opted into
+    staleness tracking - turning tracking *on* is the whole point here."""
     if demo_mode.is_demo_mode():
         device_details = demo_data.demo_device_details()
     else:
@@ -53,12 +47,8 @@ async def _rows() -> list[dict]:
             "google_name": google_name,
             "staleness": staleness_cfg,
             "status": status,
-            # Formatted for the initial render, same convention as
-            # webui/routers/devices.py's last_seen_str - the raw
-            # "last_fix_time" is passed through too (see status above) for
-            # the client-side live "X ago" ticker (staleness/list.html) to
-            # recompute against "now" every second, the same way that page's
-            # own next-poll countdown already does.
+            # Raw last_fix_time also passed through (see status above) for
+            # the client-side live "X ago" ticker to recompute each second.
             "last_fix_str": (
                 datetime.fromtimestamp(status["last_fix_time"]).strftime("%Y-%m-%d %H:%M:%S")
                 if status["last_fix_time"] else None
@@ -68,28 +58,23 @@ async def _rows() -> list[dict]:
 
 
 @router.get("/staleness")
+@login_required
 async def staleness_page(request: Request):
-    if not is_logged_in():
-        return templates.TemplateResponse(request, "_not_signed_in.html", {})
     return templates.TemplateResponse(request, "staleness/list.html", {**_TEMPLATE_CONTEXT})
 
 
 @router.get("/staleness/table")
+@login_required
 async def staleness_table(request: Request):
-    if not is_logged_in():
-        return templates.TemplateResponse(request, "_not_signed_in.html", {})
     return templates.TemplateResponse(request, "staleness/_table.html", {
         "rows": await _rows(), **_TEMPLATE_CONTEXT,
     })
 
 
 def _parse_duration_field(form, base_name: str, allow_off: bool) -> int | None:
-    """(preset select + "Custom" advanced hours input) -> seconds, or None.
-    Mirrors webui/routers/settings.py's cron preset/advanced split, just for
-    a plain duration instead of a cron expression - see
-    staleness/_device_row.html. allow_off additionally recognizes
-    staleness.REPEAT_OFF (the repeat field's "alert once, don't repeat"
-    choice - never offered on the threshold field itself)."""
+    """(preset select + "Custom" hours input) -> seconds, or None. allow_off
+    additionally recognizes staleness.REPEAT_OFF ("alert once, don't
+    repeat"), never offered on the threshold field itself."""
     preset = (form.get(f"{base_name}_preset", "") or "").strip()
     if allow_off and preset == staleness.REPEAT_OFF:
         return None
@@ -107,10 +92,8 @@ def _parse_duration_field(form, base_name: str, allow_off: bool) -> int | None:
 
 
 @router.post("/staleness/devices/{canonic_id}")
+@login_required
 async def update_device_staleness(request: Request, canonic_id: str):
-    if not is_logged_in():
-        return templates.TemplateResponse(request, "_not_signed_in.html", {})
-
     form = await request.form()
     existing = {**staleness.default_staleness(), **latest_values_store.get_device_staleness(canonic_id)}
 

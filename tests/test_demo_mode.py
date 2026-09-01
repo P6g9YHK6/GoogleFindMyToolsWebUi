@@ -305,10 +305,9 @@ def test_settings_page_unaffected_by_onboarding_placeholder(client, monkeypatch)
     """The placeholder trigger is deliberately scoped to the Devices page
     only (see webui/demo_mode.py) - Settings must still show its normal
     not-signed-in state, not fake data."""
-    from webui import demo_mode
-    from webui.routers import settings
+    from webui import auth_state, demo_mode
 
-    monkeypatch.setattr(settings, "is_logged_in", lambda: False)
+    monkeypatch.setattr(auth_state, "is_logged_in", lambda: False)
     monkeypatch.setattr(demo_mode, "is_logged_in", lambda: False)
     resp = client.get("/settings")
     assert resp.status_code == 200
@@ -316,10 +315,9 @@ def test_settings_page_unaffected_by_onboarding_placeholder(client, monkeypatch)
 
 
 def test_staleness_page_unaffected_by_onboarding_placeholder(client, monkeypatch):
-    from webui import demo_mode
-    from webui.routers import staleness as staleness_router
+    from webui import auth_state, demo_mode
 
-    monkeypatch.setattr(staleness_router, "is_logged_in", lambda: False)
+    monkeypatch.setattr(auth_state, "is_logged_in", lambda: False)
     monkeypatch.setattr(demo_mode, "is_logged_in", lambda: False)
     resp = client.get("/staleness")
     assert resp.status_code == 200
