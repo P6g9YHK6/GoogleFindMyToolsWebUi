@@ -50,12 +50,11 @@ def _render(template: str, ctx: dict) -> str:
     return _TOKEN_RE.sub(repl, template)
 
 
-# The device_meta fields with a dedicated, hand-picked template name - see
-# the device_meta paragraph in build_context's docstring below. Anything
-# else present in device_meta gets a generic "label_<key>" name instead,
-# so a field added to get_device_details later needs no change here to
-# become available as a variable.
-_NAMED_DEVICE_META_KEYS = ("manufacturer", "model", "type", "type_id", "image_url")
+# device_meta fields with a dedicated {{name}} - everything else in
+# device_meta becomes {{label_<key>}} instead (see build_context below).
+# Also used by presets.py's device_label_variables() to know which keys
+# NOT to offer as a label_ chip.
+NAMED_DEVICE_META_KEYS = ("manufacturer", "model", "type", "type_id", "image_url")
 
 
 def build_context(
@@ -86,7 +85,7 @@ def build_context(
     photo URL, and phone-only hardware/sharing info), synced into
     forwarding.yaml by webui/routers/settings.py's _rows() the same way
     google_name already is - see that function's own comment for why this
-    can't just be fetched fresh here instead. _NAMED_DEVICE_META_KEYS above
+    can't just be fetched fresh here instead. NAMED_DEVICE_META_KEYS above
     get their own {{name}}; everything else in the dict becomes
     {{label_<key>}}, generically - see the loop below."""
     ctx = {
@@ -136,13 +135,13 @@ def build_context(
         "tracker_id": tracker_id or "",
     }
     meta = device_meta or {}
-    for key in _NAMED_DEVICE_META_KEYS:
+    for key in NAMED_DEVICE_META_KEYS:
         # "is not None", not "or \"\"" - type_id can legitimately be 0
         # (DEVICE_TYPE_UNKNOWN), which "or" would wrongly blank out.
         value = meta.get(key)
         ctx[key] = value if value is not None else ""
     for key, value in meta.items():
-        if key not in _NAMED_DEVICE_META_KEYS:
+        if key not in NAMED_DEVICE_META_KEYS:
             ctx[f"label_{key}"] = value if value is not None else ""
     # No UI writes "variables" anymore (see webui/forwarders/presets.py's
     # module docstring) - this merge only still matters for an endpoint
