@@ -25,21 +25,17 @@ CHROME_FOR_TESTING_JSON_URL = (
     "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json"
 )
 X_PACKAGES = ["xvfb", "x11vnc", "novnc", "websockify"]
-# Chrome for Testing is downloaded as a bare binary (see download_chrome), so
-# the shared libraries it dlopen's at startup have to come from apt instead -
-# without these the launch fails with a "Chrome was not detected" error even
-# though the binary is right there and executable.
+# Chrome for Testing ships as a bare binary (download_chrome) - these shared
+# libs it dlopen's at startup have to come from apt or launch fails with
+# "Chrome was not detected" despite the binary being right there.
 CHROME_DEPS = [
     "fonts-liberation", "libasound2", "libatk-bridge2.0-0", "libatk1.0-0",
     "libcups2", "libdrm2", "libgbm1", "libgtk-3-0", "libnspr4", "libnss3",
     "libpango-1.0-0", "libpangocairo-1.0-0", "libx11-xcb1", "libxcomposite1",
     "libxdamage1", "libxfixes3", "libxkbcommon0", "libxrandr2", "xdg-utils",
 ]
-# Default _wait() fallback for the handful of genuinely-quick calls that
-# don't bother passing their own explicit timeout below. Every apt/dpkg call
-# (the ones that can legitimately run long) uses _run_with_idle_timeout
-# instead - see its own docstring for why a flat deadline doesn't work for
-# those.
+# Default _wait() fallback for quick calls with no explicit timeout - apt/dpkg
+# calls use _run_with_idle_timeout instead (see its own docstring).
 _SUBPROCESS_TIMEOUT_S = 180
 
 _processes: dict[str, asyncio.subprocess.Process] = {}
@@ -77,26 +73,16 @@ async def _run_with_idle_timeout(
     *args: str, env: dict[str, str], on_line: Callable[[str], Awaitable[None]] | None = None
 ) -> tuple[int, list[str]]:
     """Runs a subprocess, killing it only if it goes
-    config.GFMT_BROWSER_APT_IDLE_TIMEOUT_S seconds without producing a single
-    new line of output - not if the whole thing just runs long. Installing
-    ~19 packages plus transitive deps can legitimately take far longer than
-    any one fixed deadline on a slow disk or mirror as long as it's still
-    working (each "Unpacking"/"Setting up <pkg>" line is a discrete "still
-    alive" signal); what actually needs catching is a stuck dpkg lock or dead
-    mirror that goes completely silent, which this catches within one idle
-    window instead of guessing a total duration that's either too short for
-    a slow machine or too long for a genuinely stuck one. Also used for
-    apt-get update and dpkg --configure -a, which can go quiet the same way.
+    config.GFMT_BROWSER_APT_IDLE_TIMEOUT_S seconds without a single new line
+    of output - not if the whole thing just runs long. A ~19-package install
+    can legitimately take far longer than any fixed deadline as long as it's
+    still producing "Unpacking"/"Setting up" lines; only a stuck dpkg
+    lock/dead mirror going fully silent should be caught.
 
-    Returns every line seen (mainly so a failure can quote apt/dpkg's own
-    error text) and the real exit code - or -1 if it had to be killed for
-    going quiet, mirroring _wait()'s own timeout convention.
-
-    Logs its own start/finish (elapsed time, exit code, line count) at INFO -
-    which lands on the Logs page (webui/log_capture.py captures INFO-or-above
-    app-wide) - so a slow-but-working run and a genuinely stuck one leave a
-    distinguishable trail after the fact, instead of only a generic failure
-    message on the Config page."""
+    Returns every line seen (so a failure can quote apt/dpkg's own error
+    text) and the exit code, or -1 if killed for going quiet. Logs its own
+    start/finish at INFO (lands on the Logs page) so a slow-but-working run
+    and a genuinely stuck one leave a distinguishable trail."""
     start = time.monotonic()
     proc = await asyncio.create_subprocess_exec(
         *args, env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
@@ -143,14 +129,10 @@ async def _packages_installed(packages: list[str]) -> bool:
 
 
 async def _dpkg_configure_pending():
-    """A previous apt-get install that got killed partway through - by
-    _wait()'s own timeout, or by the container itself being stopped/OOM-killed
-    mid-install - leaves dpkg in an "interrupted" state, where every apt-get
-    call afterwards fails immediately with "dpkg was interrupted, you must
-    manually run 'dpkg --configure -a' to correct the problem", no matter how
-    many times it's retried. There's no shell into the container to run that
-    by hand, so do it ourselves, unconditionally, before every install
-    attempt - it's a fast no-op when dpkg has nothing pending."""
+    """A previous install killed partway through (timeout, container
+    stop/OOM) leaves dpkg "interrupted", failing every apt-get call after it
+    until this is run - no shell into the container to do it by hand, so run
+    it ourselves before every attempt. Fast no-op when nothing's pending."""
     await _run_with_idle_timeout(
         "dpkg", "--configure", "-a",
         env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"},
@@ -161,10 +143,8 @@ async def install_x_stack(on_progress: ProgressCallback = _no_progress):
     packages = [*X_PACKAGES, *CHROME_DEPS]
     await _dpkg_configure_pending()
 
-    # teardown() no longer purges these (see its docstring), so on every
-    # attempt after the first in a container's lifetime they're already
-    # here - skip apt entirely instead of paying for an update+install
-    # (and a network round-trip) that would just confirm what we already know.
+    # teardown() doesn't purge these, so after the first attempt they're
+    # already here - skip apt entirely rather than confirm what we know.
     if await _packages_installed(packages):
         logger.info("All %d browser-stack packages already installed, skipping apt.", len(packages))
         await on_progress("installing", "X server, VNC tools, and Chrome dependencies already installed.", 35)
@@ -176,10 +156,8 @@ async def install_x_stack(on_progress: ProgressCallback = _no_progress):
 
     update_rc, _ = await _run_with_idle_timeout("apt-get", "update", env=env)
     if update_rc not in (0, -1):
-        # Not fatal on its own - apt-get install below can still succeed
-        # against a previously-cached index - but worth flagging since it's
-        # the most likely explanation if the install that follows fails too.
-        # (-1 means _run_with_idle_timeout already killed and logged it.)
+        # Not fatal alone (install below can still work against a cached
+        # index), but flagged since it's the likely cause if that fails too.
         logger.warning(
             "apt-get update exited with code %s - package lists may be stale for the install that follows",
             update_rc,
@@ -187,9 +165,8 @@ async def install_x_stack(on_progress: ProgressCallback = _no_progress):
 
     await on_progress("installing", f"Installing X server and VNC tools... (0/{len(packages)})", 8)
 
-    # Turns apt's "Setting up <pkg>" lines into incremental phase updates, so
-    # a ~20-package install doesn't just sit on one static message for the
-    # better part of a minute.
+    # Turns apt's "Setting up <pkg>" lines into incremental phase updates
+    # instead of one static message for the whole install.
     total = len(packages)
     installed = 0
     base_percent, cap_percent = 8, 33
@@ -201,9 +178,8 @@ async def install_x_stack(on_progress: ProgressCallback = _no_progress):
         installed += 1
         # "Setting up libgtk-3-0:amd64 (3.24.38-2ubuntu1) ..." -> "libgtk-3-0"
         name = text[len("Setting up "):].split(" ", 1)[0].split(":")[0]
-        # Transitive dependencies not in our own list also print a "Setting
-        # up" line, so `installed` can exceed `total` - clamp both the
-        # percent and the displayed counter for that case.
+        # Transitive deps not in our list also print this, so installed can
+        # exceed total - clamp both the percent and displayed counter.
         percent = min(base_percent + round(installed / total * (cap_percent - base_percent)), cap_percent)
         await on_progress(
             "installing",
@@ -215,25 +191,17 @@ async def install_x_stack(on_progress: ProgressCallback = _no_progress):
         "apt-get", "install", "-y", "--no-install-recommends", *packages, env=env, on_line=_on_line,
     )
     if rc == -1:
-        # _run_with_idle_timeout's own timeout, not an apt-get failure - the
-        # tail of output here is just whatever apt happened to be unpacking
-        # at the moment it went quiet, not an error, so say that plainly
-        # instead of showing it as if it were one.
+        # An idle-timeout kill, not an apt-get failure - say so plainly
+        # rather than showing the output tail as if it were an error.
         raise RuntimeError(
             f"apt-get install of xvfb/x11vnc/novnc/websockify/chrome-deps produced no output for "
             f"{config.GFMT_BROWSER_APT_IDLE_TIMEOUT_S}s and was killed as stuck - check the "
             f"container's network access to its package mirror, or a stuck dpkg/apt lock."
         )
     if rc != 0:
-        # The Config page only ever gets the last 10 lines below (see
-        # RuntimeError's message) - log the full transcript at ERROR too, so
-        # a report that only pastes the on-screen error still leaves the
-        # complete run in server logs (the Logs page included) to dig through.
+        # The Config page only sees the last 10 lines below - log the full
+        # transcript at ERROR too, so it's on the Logs page either way.
         logger.error("apt-get install failed (exit code %s); full output:\n%s", rc, "\n".join(output_lines))
-        # Surface apt/dpkg's own error text (e.g. "dpkg was interrupted...",
-        # a missing/unreachable package, a broken mirror) instead of just
-        # "it failed" - that's the only diagnostic a user without a shell
-        # into the container has to go on.
         tail = "\n".join(output_lines[-10:])
         detail = f": {tail}" if tail else ""
         raise RuntimeError(f"apt-get install of xvfb/x11vnc/novnc/websockify/chrome-deps failed{detail}")
@@ -244,9 +212,8 @@ async def install_x_stack(on_progress: ProgressCallback = _no_progress):
 async def download_chrome(on_progress: ProgressCallback = _no_progress) -> str:
     global _chrome_bin
 
-    # teardown() no longer deletes chrome-linux64 between attempts (see its
-    # docstring), so if a previous attempt already fetched it in this
-    # container's lifetime, reuse it instead of re-downloading/re-extracting.
+    # teardown() doesn't delete chrome-linux64 between attempts - reuse a
+    # previous fetch instead of re-downloading/re-extracting.
     cached_bin = os.path.join(_runtime_dir(), "chrome-linux64", "chrome")
     if os.path.exists(cached_bin) and os.access(cached_bin, os.X_OK):
         await on_progress("extracting", "Chrome already downloaded.", 70)
@@ -270,10 +237,10 @@ async def download_chrome(on_progress: ProgressCallback = _no_progress) -> str:
 
     await on_progress("downloading", f"Downloading Chrome for Testing {version}...", 45)
     try:
-        # A background thread can't actually be killed on timeout the way
-        # _wait() kills a hung subprocess - urlretrieve keeps running in it
-        # even after this raises. Harmless: it only ever writes to zip_path,
-        # which the next attempt overwrites outright before extracting.
+        # A background thread can't be killed on timeout the way _wait()
+        # kills a subprocess - urlretrieve keeps running after this raises,
+        # harmlessly: it only writes zip_path, which the next attempt
+        # overwrites before extracting.
         await asyncio.wait_for(
             asyncio.to_thread(urllib.request.urlretrieve, url, zip_path),
             timeout=config.GFMT_BROWSER_DOWNLOAD_TIMEOUT_S,
@@ -303,14 +270,9 @@ async def download_chrome(on_progress: ProgressCallback = _no_progress) -> str:
 
 async def _spawn_checked(name: str, *args: str):
     """Starts a tracked process and confirms it's still running a moment
-    later, instead of blindly assuming it worked. A stale process from a
-    previous unclean shutdown still holding this one's port (:99/5900/6901)
-    makes it exit immediately - without this check, the flow would sail on
-    to "ready" and show a VNC iframe that can never connect, with no error
-    surfaced anywhere. stdout/stderr stay DEVNULL rather than PIPE (unlike
-    apt's progress-reporting pipe in _report_apt_progress) since none of
-    these are chatty in steady state - the exit-code check alone is enough
-    to catch this failure mode without risking a full-pipe deadlock."""
+    later - a stale process from a previous unclean shutdown still holding
+    this one's port (:99/5900/6901) makes it exit immediately, which
+    otherwise sails on to "ready" with a VNC iframe that can never connect."""
     proc = await asyncio.create_subprocess_exec(
         *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
     )
@@ -328,13 +290,10 @@ async def start_x_stack(on_progress: ProgressCallback = _no_progress):
     await on_progress("launching", "Starting virtual display...", 75)
     await _spawn_checked(
         "xvfb",
-        # undetected_chromedriver unconditionally forces --window-size=1920,1080
-        # on the Chrome it launches (it appends its own options after ours, and
-        # that flag wins), and there's no window manager here to honor
-        # --start-maximized and resize it back down. A smaller Xvfb screen just
-        # crops that window instead of shrinking it, so what x11vnc shows is an
-        # off-center sliver of a bigger window rather than the whole thing -
-        # match Xvfb's resolution to it so the full, centered window is visible.
+        # undetected_chromedriver forces --window-size=1920,1080 on the
+        # Chrome it launches, and there's no window manager here to resize
+        # it back down - a smaller Xvfb screen would just crop it. Match
+        # Xvfb's resolution so the full window is visible over VNC.
         "Xvfb", ":99", "-screen", "0", "1920x1080x24", "-nolisten", "tcp",
     )
 
@@ -380,25 +339,18 @@ async def _kill_tracked(name: str, proc: asyncio.subprocess.Process) -> str | No
 
 
 async def teardown() -> list[str]:
-    """Stops the chrome/Xvfb/x11vnc/websockify processes only. Deliberately
-    does NOT purge the apt packages or delete the downloaded Chrome binary -
-    both are left in place for the rest of this container's life (including
-    across a plain `docker stop`/`start`, not just between attempts within
-    one "up") so the next sign-in can skip straight past install_x_stack/
-    download_chrome instead of repeating a ~30-90s install+download. That's
-    safe to leave persisted indefinitely: every real way this image gets
-    updated (`docker compose up` after a pull, a `docker run` recreate,
-    Unraid's own Update button) replaces the container outright, discarding
-    this cache along with it regardless.
+    """Stops the chrome/Xvfb/x11vnc/websockify processes only - deliberately
+    leaves the apt packages and downloaded Chrome binary in place for this
+    container's life, so the next sign-in skips straight past
+    install_x_stack/download_chrome. Safe indefinitely: every real image
+    update replaces the container outright, discarding the cache anyway.
 
-    Returns the names of whichever processes didn't exit cleanly and had to
-    be force-killed, for the caller to decide whether that's worth surfacing.
+    Returns the names of whichever processes had to be force-killed.
     """
     global _chrome_bin
 
-    # Run every kill/wait concurrently rather than stacking them sequentially,
-    # so a full teardown reliably finishes in one ~5s window instead of up to
-    # 5s per process - comfortably inside Docker's default stop grace period.
+    # Concurrent, not sequential, so teardown finishes in one ~5s window
+    # instead of up to 5s per process - within Docker's stop grace period.
     results = await asyncio.gather(
         kill_chrome(),
         *(_kill_tracked(name, proc) for name, proc in _processes.items()),

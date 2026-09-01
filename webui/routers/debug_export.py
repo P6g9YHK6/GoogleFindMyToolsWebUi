@@ -1,40 +1,25 @@
-""""Export debug info" button on the Config page (see GitHub issue #23) - a
+""""Export debug info" button on the Config page (GitHub issue #23) - a
 downloadable snapshot of a fresh device-list query plus a locate attempt for
-every device, for attaching to a bug report instead of asking someone to
-copy-paste logs by hand.
+every device, for attaching to a bug report.
 
-Bundled as a 7z archive (not zip - the stdlib's zipfile can't write encrypted
-archives at all, and 7z's AES-256 is meaningfully stronger than zip's legacy
-ZipCrypto anyway) via py7zr, built entirely in memory. A password is
-optional: leave it blank for a plain local download, or set one so the
-archive is safe to attach to a public issue or hand to someone else without
-exposing device locations/emails in the clear.
+Bundled as a 7z archive via py7zr, built entirely in memory - not zip
+(stdlib zipfile can't write encrypted archives, and 7z's AES-256 beats zip's
+ZipCrypto anyway). Password optional: blank for a plain local download, set
+one to safely attach to a public issue.
 
-Three independent toggles shape what actually goes in:
-- include_live_query: run a fresh device-list + locate-all query. Off lets
-  someone grab just the recent logs without touching Google's API at all
-  (and without needing to be signed in for it).
-- include_logs: fold in the last _LOG_LINES_LIMIT lines of both the system
-  and forwarding logs - the Logs page already shows these, so this defaults
-  off; a report that's just the API payload is sometimes all that's wanted.
-- anonymize_locations: replaces each decrypted location's real coordinates/
-  accuracy/altitude with random numbers and any semantic place name with
-  random characters (regenerating map_links to match), so the *shape* of the
-  decoded location data is still visible for debugging parsing/forwarding
-  logic without exposing where the device actually was. Since that scrubbing
-  only touches the decoded JSON, each device's locate/*/raw_hex.txt and
-  protobuf_text.txt (the still-encrypted E2EE wire format underneath) are
-  left out of the archive entirely rather than included un-scrubbed - see
-  _ANONYMIZATION_NOTICE, which is also dropped into the archive itself as
-  ANONYMIZATION_NOTICE.txt so this isn't a silent omission.
-At least one of include_live_query/include_logs must be set - an archive
-with neither would just be an empty manifest.
+Three independent toggles: include_live_query (a fresh device-list+locate
+query; off needs no Google sign-in at all), include_logs (last
+_LOG_LINES_LIMIT lines of both logs, default off), anonymize_locations
+(scrubs decoded coordinates/accuracy/altitude/semantic names to random
+values, keeping the JSON's *shape* for debugging without the real location -
+the still-encrypted raw_hex.txt/protobuf_text.txt are left out of the
+archive entirely instead, see _ANONYMIZATION_NOTICE). At least one of
+include_live_query/include_logs must be set.
 
-This route must never surface an actual account credential - it only goes
-through request_device_list()/get_location_data_for_device(), which pull
-tokens internally (via nova_request()) but never return them to the caller.
-Never import Auth.token_cache/Auth.aas_token_retrieval/Auth.adm_token_retrieval
-here.
+SECURITY: this route must never surface an actual account credential - it
+only goes through request_device_list()/get_location_data_for_device(),
+which pull tokens internally but never return them. Never import
+Auth.token_cache/Auth.aas_token_retrieval/Auth.adm_token_retrieval here.
 """
 
 import asyncio
