@@ -14,9 +14,9 @@ import os
 import time
 import urllib.request
 import zipfile
-from collections.abc import Awaitable, Callable
 
 from webui import config
+from webui.progress import ProgressCallback, _no_progress
 
 logger = logging.getLogger("webui.browser_stack")
 
@@ -43,12 +43,6 @@ _SUBPROCESS_TIMEOUT_S = 180
 
 _processes: dict[str, asyncio.subprocess.Process] = {}
 _chrome_bin: str | None = None
-
-ProgressCallback = Callable[[str, str, int], Awaitable[None]]
-
-
-async def _no_progress(phase: str, message: str, percent: int):
-    pass
 
 
 def _runtime_dir() -> str:

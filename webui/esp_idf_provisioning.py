@@ -19,9 +19,9 @@ import os
 import pathlib
 import re
 import shutil
-from collections.abc import Awaitable, Callable
 
 from webui import config
+from webui.progress import ProgressCallback, _no_progress
 
 logger = logging.getLogger("webui.esp_idf_provisioning")
 
@@ -36,12 +36,6 @@ IDF_TARGETS = "esp32,esp32c3"
 # Marker file written only after install.sh exits 0 - see is_provisioned()'s
 # docstring for why this matters over just checking tools/idf.py exists.
 _MARKER_NAME = ".gfmt-provisioned"
-
-ProgressCallback = Callable[[str, str, int], Awaitable[None]]
-
-
-async def _no_progress(phase: str, message: str, percent: int):
-    pass
 
 
 def _idf_dir() -> pathlib.Path:
