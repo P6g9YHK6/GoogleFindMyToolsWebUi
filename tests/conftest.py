@@ -59,7 +59,7 @@ def stub_backend(monkeypatch):
     from webui import auth_state, demo_mode
     from webui.device_list_cache import device_list_cache
     from webui.forwarders import settings_service
-    from webui.routers import auth, devices, firmware, locate, logs, register, settings, sound
+    from webui.routers import auth, devices, locate, register, sound
     from webui.routers import staleness as staleness_router
 
     # webui/device_list_cache.py's singleton is a real module-level global

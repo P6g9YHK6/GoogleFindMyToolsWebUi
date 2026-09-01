@@ -14,6 +14,7 @@ import os
 import time
 import urllib.request
 import zipfile
+from collections.abc import Awaitable, Callable
 
 from webui import config
 from webui.progress import ProgressCallback, _no_progress
