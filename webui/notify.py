@@ -21,6 +21,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import apprise
 
+from webui import demo_mode
+
 logger = logging.getLogger(__name__)
 
 _TARGET_LOGGER = ""  # root
@@ -71,6 +73,15 @@ def configure_apprise_logging(env: Mapping[str, str] | None = None) -> logging.H
     for existing in list(target_logger.handlers):
         if isinstance(existing, _AppriseLogHandler):
             target_logger.removeHandler(existing)
+
+    if demo_mode.is_demo_mode():
+        # Never installs a handler in demo mode, regardless of what a
+        # visitor typed into the App Settings form (see
+        # webui/routers/auth.py) - that save was never persisted anyway
+        # (see webui/settings_store.py), but this guards independently in
+        # case anything ever calls this with a real APPRISE_URLS env var
+        # still set on a demo deployment.
+        return None
 
     urls_raw = (env.get("APPRISE_URLS") or "").strip()
     if not urls_raw:

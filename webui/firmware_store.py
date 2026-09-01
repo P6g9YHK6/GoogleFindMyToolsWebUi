@@ -36,7 +36,7 @@ import threading
 
 import yaml
 
-from webui import config
+from webui import config, demo_mode
 
 _lock = threading.Lock()
 
@@ -110,6 +110,12 @@ def _save_unlocked(data: dict):
 def record_registration(eid_hex: str, pair_date: int, *, display_name: str = "", device_type: str = "",
                          manufacturer_name: str = "", model_name: str = "", image_url: str = "",
                          experimental_official_app_compat: bool = False, keep_track: bool = False):
+    if demo_mode.is_demo_mode():
+        # A demo visitor's /register click must never write a real entry to
+        # shared disk - see webui/demo_mode.py. The fake EID (see
+        # webui/demo_data.py's fake_register_result) still displays once,
+        # from the response itself - it just isn't remembered for next time.
+        return
     # The identity fields are stored per-entry (not just as the single
     # top-level "last used" record - see record_identity below) so a
     # kept-track entry is a standalone record of exactly what was
@@ -134,6 +140,8 @@ def record_registration(eid_hex: str, pair_date: int, *, display_name: str = "",
 
 def record_build_settings(eid_hex: str, device_name: str, adv_interval_ms: int,
                            tx_power_dbm: int, tracking_protection: bool):
+    if demo_mode.is_demo_mode():
+        return  # moot anyway - Firmware Build itself is disabled in demo mode
     with _lock:
         data = _load_unlocked()
         settings = {
@@ -156,6 +164,8 @@ def set_keep_track(eid_hex: str, keep_track: bool):
     """Flips an existing entry's keep_track flag - the Tracked Registrations
     panel's "Stop tracking" button (see webui/routers/firmware.py). No-op if
     eid_hex isn't a known entry (nothing to flip)."""
+    if demo_mode.is_demo_mode():
+        return  # moot anyway - list_registered() below is always empty
     with _lock:
         data = _load_unlocked()
         for entry in data["entries"]:
@@ -166,11 +176,20 @@ def set_keep_track(eid_hex: str, keep_track: bool):
 
 
 def list_registered() -> list[dict]:
+    if demo_mode.is_demo_mode():
+        # Never reads registered_trackers.yaml - see record_registration()
+        # above for why nothing's ever in it in demo mode. Keeping the
+        # Firmware page's "previously registered" list/Tracked Registrations
+        # panel simply empty is an acceptable simplification here (not a
+        # core showcase feature), rather than fabricating fake history.
+        return []
     with _lock:
         return _load_unlocked()["entries"]
 
 
 def load_last_identity() -> dict:
+    if demo_mode.is_demo_mode():
+        return dict(DEFAULT_IDENTITY)
     with _lock:
         return {**DEFAULT_IDENTITY, **_load_unlocked()["last_identity"]}
 
@@ -178,6 +197,8 @@ def load_last_identity() -> dict:
 def record_identity(display_name: str, device_type: str, manufacturer_name: str,
                      model_name: str, image_url: str,
                      experimental_official_app_compat: bool = False):
+    if demo_mode.is_demo_mode():
+        return
     with _lock:
         data = _load_unlocked()
         data["last_identity"] = {

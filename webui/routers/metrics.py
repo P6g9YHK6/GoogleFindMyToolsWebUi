@@ -11,7 +11,7 @@ import time
 
 from fastapi import APIRouter, Response
 
-from webui import config, staleness, system_log_store
+from webui import config, demo_mode, staleness, system_log_store
 from webui.auth_state import is_logged_in
 from webui.deps import query_gate
 from webui.forwarders import config_store, latest_values_store, log_store
@@ -39,6 +39,11 @@ def _render() -> str:
         "# HELP gfmt_logged_in Whether a Google account is currently signed in (1) or not (0).",
         "# TYPE gfmt_logged_in gauge",
         f"gfmt_logged_in {1 if is_logged_in() else 0}",
+        "",
+        "# HELP gfmt_demo_mode Whether this instance is running in demo mode (1) or not (0) - "
+        "see DEMO_MODE. Every other gauge above/below reflects the fixed demo dataset when this is 1.",
+        "# TYPE gfmt_demo_mode gauge",
+        f"gfmt_demo_mode {1 if demo_mode.is_demo_mode() else 0}",
         "",
         "# HELP gfmt_query_gate_waiting Requests currently queued behind the account-wide throttle.",
         "# TYPE gfmt_query_gate_waiting gauge",

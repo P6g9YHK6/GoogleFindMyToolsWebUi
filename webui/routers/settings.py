@@ -4,7 +4,7 @@ import yaml
 from croniter import croniter
 from fastapi import APIRouter, Form, HTTPException, Request
 
-from webui import scheduler
+from webui import demo_mode, scheduler
 from webui.auth_state import is_logged_in
 from webui.forwarders import (
     BUILTIN_VARIABLES_FROM_APP,
@@ -194,7 +194,12 @@ async def save_device_yaml_route(request: Request, canonic_id: str, yaml_text: s
         })
     latest_values_store.prune_to_urls(canonic_id, {ep["url"] for ep in endpoints})
 
-    fresh_row = await settings_service.row(canonic_id, saved=True)
+    # In demo mode, config_store.set_device_config() above was a no-op (see
+    # webui/device_store.py) - re-reading now would just show the fixed seed
+    # again, not what was just typed. Echo the just-built device_cfg back
+    # instead, for this one response only - same "saved" toast either way.
+    saved_overrides = {canonic_id: {"config": device_cfg, "error": None}} if demo_mode.is_demo_mode() else None
+    fresh_row = await settings_service.row(canonic_id, overrides=saved_overrides, saved=True)
     return templates.TemplateResponse(request, "settings/_device_form.html", {
         "row": fresh_row, **_TEMPLATE_CONTEXT,
     })
@@ -322,7 +327,11 @@ async def update_device_settings(
         })
     latest_values_store.prune_to_urls(canonic_id, {ep["url"] for ep in endpoints})
 
-    row = await settings_service.row(canonic_id, saved=True)
+    # See the matching comment in save_device_yaml_route above - demo mode's
+    # set_device_config() call was a no-op, so echo back what was just typed
+    # instead of re-reading the fixed seed.
+    saved_overrides = {canonic_id: {"config": device_cfg, "error": None}} if demo_mode.is_demo_mode() else None
+    row = await settings_service.row(canonic_id, overrides=saved_overrides, saved=True)
     return templates.TemplateResponse(request, "settings/_device_form.html", {
         "row": row, **_TEMPLATE_CONTEXT,
     })
