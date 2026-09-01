@@ -12,6 +12,7 @@ from webui import (
     auth_state,
     browser_provisioning,
     config,
+    demo_mode,
     log_capture,
     notify,
     scheduler,
@@ -53,14 +54,21 @@ BASE_DIR = pathlib.Path(__file__).parent
 async def lifespan(app: FastAPI):
     notify.configure_apprise_logging(env=settings_store.apprise_env())
     log_capture.configure_log_capture()
-    scheduler.start_all()
-    # Independent of scheduler.start_all() above - see webui/staleness.py's
-    # own docstring for why a device with no forwarding endpoints (never
-    # polled by any of that module's per-device loops) still needs this.
-    staleness_task = asyncio.create_task(staleness.sweep_loop())
+    staleness_task = None
+    if not demo_mode.is_demo_mode():
+        # Nothing legitimate to poll in demo mode - every device is fake and
+        # nothing is ever actually persisted (see webui/device_store.py) -
+        # and skipping both avoids a poll/sweep loop ticking forever against
+        # fake data with nothing real to show for it.
+        scheduler.start_all()
+        # Independent of scheduler.start_all() above - see webui/staleness.py's
+        # own docstring for why a device with no forwarding endpoints (never
+        # polled by any of that module's per-device loops) still needs this.
+        staleness_task = asyncio.create_task(staleness.sweep_loop())
     yield
     scheduler.stop_all()
-    staleness_task.cancel()
+    if staleness_task is not None:
+        staleness_task.cancel()
     await browser_provisioning.on_shutdown()
 
 
@@ -101,7 +109,10 @@ async def health():
         problems.append("forwarding.yaml failed to load")
     if not auth_state.auth_store_ok():
         problems.append("auth.yaml failed to load")
-    if not os.access(config.DATA_DIR, os.W_OK):
+    # Moot in demo mode - nothing is ever actually written to DATA_DIR (see
+    # webui/device_store.py), so a demo deployment mounting it read-only for
+    # extra safety shouldn't be reported unhealthy over it.
+    if not demo_mode.is_demo_mode() and not os.access(config.DATA_DIR, os.W_OK):
         problems.append(f"{config.DATA_DIR} is not writable")
 
     if problems:

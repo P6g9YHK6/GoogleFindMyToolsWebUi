@@ -7,7 +7,7 @@ from fastapi import APIRouter, Form, Request
 
 from Auth.fcm_receiver import FcmReceiver
 from Auth.token_cache import clear_all_cached_values, get_cached_value
-from webui import browser_provisioning, notify, settings_store
+from webui import browser_provisioning, demo_data, demo_mode, notify, settings_store
 from webui.auth_state import is_logged_in
 from webui.deps import query_gate
 from webui.templating import templates
@@ -112,6 +112,10 @@ _DIAGNOSTIC_KEYS = ["username", "aas_token", "fcm_credentials", "shared_key", "o
 
 
 def _auth_status() -> dict:
+    if demo_mode.is_demo_mode():
+        # A fully "signed in" account, not the real (empty-in-demo-mode)
+        # token cache - see webui/demo_data.py.
+        return demo_data.demo_auth_status()
     return {
         "logged_in": is_logged_in(),
         "username": get_cached_value("username"),
@@ -257,6 +261,12 @@ async def auth_status(request: Request):
 
 @router.post("/auth/clear")
 async def auth_clear(request: Request):
+    if demo_mode.is_demo_mode():
+        # Nothing real to clear - see _auth_status() above - and this skips
+        # touching the real (harmless but pointless) token cache/FcmReceiver
+        # singleton on a public instance.
+        return templates.TemplateResponse(request, "auth/_status.html", {"status": _auth_status()})
+
     if browser_provisioning.is_active():
         # Clearing mid-flow is exactly how the "aas_token present but
         # fcm_credentials missing" split-brain state kept happening: a sign-in
@@ -284,11 +294,25 @@ async def auth_clear(request: Request):
     })
 
 
+_DEMO_LOGIN_DISABLED_STATE = {
+    "phase": "error", "message": "Sign-in is disabled on this demo instance.", "percent": 0,
+    "error": "disabled in demo mode", "cleanup_warning": None,
+}
+
+
 @router.post("/auth/login/start")
 async def auth_login_start():
+    if demo_mode.is_demo_mode():
+        # Server-side block, not just the disabled button in auth/login.html
+        # - never reaches browser_provisioning.start() (itself also guarded,
+        # see that module) so a public instance can never be made to spin up
+        # a real embedded-browser OAuth session.
+        return {"started": False, "state": _DEMO_LOGIN_DISABLED_STATE}
     return await browser_provisioning.start()
 
 
 @router.get("/auth/login/poll")
 async def auth_login_poll():
+    if demo_mode.is_demo_mode():
+        return _DEMO_LOGIN_DISABLED_STATE
     return browser_provisioning.get_state()

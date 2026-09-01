@@ -14,7 +14,7 @@ from starlette.datastructures import FormData
 
 from NovaApi.ListDevices.nbe_list_devices import request_device_list
 from ProtoDecoders.decoder import get_device_details, parse_device_list_protobuf
-from webui import device_location_store, scheduler
+from webui import demo_data, demo_mode, device_location_store, scheduler
 from webui.deps import run_blocking
 from webui.device_list_cache import device_list_cache
 from webui.forwarders import build_context, config_store, device_label_variables, latest_values_store, policy
@@ -93,18 +93,23 @@ def preview_values_json_for(canonic_id: str, google_name: str, device_meta: dict
 
 
 async def rows(overrides: dict[str, dict] | None = None, saved_id: str | None = None) -> list[dict]:
-    def _fetch():
-        result_hex = request_device_list()
-        device_list = parse_device_list_protobuf(result_hex)
-        return get_device_details(device_list)
+    if demo_mode.is_demo_mode():
+        # Same fake canonic_ids as webui/routers/devices.py's Devices page -
+        # never a real Nova fetch, see webui/demo_data.py.
+        device_details = demo_data.demo_device_details()
+    else:
+        def _fetch():
+            result_hex = request_device_list()
+            device_list = parse_device_list_protobuf(result_hex)
+            return get_device_details(device_list)
 
-    # Same richer per-device dicts webui/routers/devices.py fetches - not
-    # because this page needs the rest of what's in them, but because both
-    # pages share one underlying device_list_cache slot (see its own
-    # docstring): whichever page loads first within the cache's TTL decides
-    # what shape the other one gets back too, so both have to ask for the
-    # same shape. Only name/canonic_id are actually used below.
-    device_details = await run_blocking(device_list_cache.get_or_fetch, _fetch)
+        # Same richer per-device dicts webui/routers/devices.py fetches - not
+        # because this page needs the rest of what's in them, but because both
+        # pages share one underlying device_list_cache slot (see its own
+        # docstring): whichever page loads first within the cache's TTL decides
+        # what shape the other one gets back too, so both have to ask for the
+        # same shape. Only name/canonic_id are actually used below.
+        device_details = await run_blocking(device_list_cache.get_or_fetch, _fetch)
     devices = config_store.all_devices()
 
     result = []

@@ -8,6 +8,8 @@ import time
 
 import httpx
 
+from webui import demo_mode
+
 logger = logging.getLogger("webui.forwarders.custom")
 
 TIMEOUT_S = 10
@@ -174,6 +176,16 @@ def forward_to_custom(
     url_template = (endpoint_cfg.get("url") or "").strip()
     if not url_template:
         return False
+
+    if demo_mode.is_demo_mode():
+        # Simulated success, no matter what a visitor typed into this
+        # endpoint's URL/headers/body - see webui/demo_mode.py. This is the
+        # one real send call site for both the cron loop (which never runs
+        # in demo mode anyway - see webui/main.py's lifespan) and the
+        # "Send now" button, so one check here covers both; also
+        # independently backstopped by webui/demo_network_guard.py in case
+        # this is ever bypassed.
+        return True
 
     ctx = build_context(endpoint_cfg, location, device_name, device_alias, tracker_id, device_meta)
     # Query params live in the URL itself now (a literal "?key=value"), not
