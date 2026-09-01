@@ -50,7 +50,7 @@ def _blocked(*args, **kwargs):
 def install(enabled: bool):
     if not enabled:
         return
-    requests.sessions.Session.request = _blocked
-    httpx.Client.request = _blocked
-    httpx.AsyncClient.request = _blocked
-    websockets.connect = _blocked
+    requests.sessions.Session.request = _blocked  # type: ignore[method-assign]
+    httpx.Client.request = _blocked  # type: ignore[method-assign]
+    httpx.AsyncClient.request = _blocked  # type: ignore[method-assign]
+    websockets.connect = _blocked  # type: ignore[misc,assignment]

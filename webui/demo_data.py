@@ -24,6 +24,7 @@ from this same fixed seed.
 """
 
 import time
+from typing import Any
 
 from NovaApi.ExecuteAction.LocateTracker.decrypt_locations import create_map_links
 
@@ -38,7 +39,7 @@ OWNER_DISPLAY_NAME = "Demo User"
 # webui/routers/devices.py's _DEVICE_TYPE_LABELS keys for everything else,
 # picked to fit the persona where one already exists in that map (Beacon,
 # Umbrella).
-_DEVICES = [
+_DEVICES: list[dict[str, Any]] = [
     {
         "name": "Reverse-Engineered Pixel", "canonic_id": "demo-reverse-engineered-pixel", "alias": None,
         "is_phone": True, "device_type": None, "manufacturer": "Google", "model": "Pixel 9",
