@@ -1,0 +1,16 @@
+{# Shared partials reused across more than one page. #}
+
+{% macro columns_menu(columns) %}
+  {# static/tables.js reads these checkboxes on load/change and persists the
+     result - one entry per (data-col, label) pair. #}
+  <div class="table-toolbar">
+    <details class="columns-menu">
+      <summary>Columns</summary>
+      <menu>
+        {% for col_id, label in columns %}
+          <li><label><input type="checkbox" data-col="{{ col_id }}" checked> {{ label }}</label></li>
+        {% endfor %}
+      </menu>
+    </details>
+  </div>
+{% endmacro %}
