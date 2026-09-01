@@ -44,7 +44,6 @@ import random
 import re
 import string
 import time
-from urllib.parse import urlsplit
 
 import py7zr
 from fastapi import APIRouter, Form
@@ -60,6 +59,7 @@ from webui.auth_state import is_logged_in
 from webui.deps import locate_device_with_capture, run_blocking
 from webui.device_list_cache import device_list_cache
 from webui.forwarders import log_store as forward_log_store
+from webui.url_redact import url_origin
 
 router = APIRouter()
 
@@ -72,19 +72,12 @@ _URL_RE = re.compile(r"https?://[^\s)]+")
 
 
 def _redact_urls(text: str) -> str:
-    """Collapses any http(s) URL down to just its scheme+host, dropping path
-    and query - some built-in forwarding presets embed an access token
-    directly in the URL path (see webui/forwarders/policy.py's
-    _redacted_endpoint_target, the same technique applied here), and
-    webui/forwarders/log_store.py's stored entries are NOT already redacted
-    for that. Applied uniformly to every forward-log string field, not just
-    `target`, since it's cheap and a token could in principle end up
-    reflected into `response` too."""
+    """Redacts every URL in text down to scheme+host - forward_log_store's
+    stored entries aren't already redacted, and a token could in principle
+    end up in any of the string fields, not just `target`."""
     def _strip(match: re.Match) -> str:
-        parsed = urlsplit(match.group(0))
-        if parsed.scheme and parsed.netloc:
-            return f"{parsed.scheme}://{parsed.netloc}/...(redacted)"
-        return "(redacted-url)"
+        origin = url_origin(match.group(0))
+        return f"{origin}/...(redacted)" if origin else "(redacted-url)"
     return _URL_RE.sub(_strip, text or "")
 
 

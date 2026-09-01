@@ -8,10 +8,10 @@ built on top of everything here.
 import json
 import logging
 import time
-from urllib.parse import urlsplit
 
 from webui.forwarders.custom import forward_to_custom
 from webui.geo import haversine_distance_m
+from webui.url_redact import url_origin
 
 logger = logging.getLogger("webui.forwarders.policy")
 
@@ -266,15 +266,10 @@ def _endpoint_target(endpoint_cfg: dict) -> str:
 
 
 def _redacted_endpoint_target(endpoint_cfg: dict) -> str:
-    """Same as _endpoint_target, but with the URL's path and query dropped -
-    some built-in presets (see webui/forwarders/presets.py) embed an access
-    token directly in the URL path, and this one, unlike _endpoint_target's
-    other callers, feeds the shared application log rather than this
-    endpoint's own Forwarding Log entry (where the owner already sees their
-    full endpoint config right next to it)."""
-    url = endpoint_cfg.get("url") or ""
-    parsed = urlsplit(url)
-    host = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else "(unparseable url)"
+    """Same as _endpoint_target, but with the URL's path/query dropped, since
+    this one feeds the shared application log rather than this endpoint's own
+    Forwarding Log entry."""
+    host = url_origin(endpoint_cfg.get("url") or "") or "(unparseable url)"
     method = endpoint_cfg.get("method") or "GET"
     label = f"{method} {host}/...".strip()
     alias = endpoint_cfg.get("alias")
