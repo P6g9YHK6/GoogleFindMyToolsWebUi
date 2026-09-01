@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request
 from NovaApi.ListDevices.nbe_list_devices import request_device_list
 from ProtoDecoders.decoder import get_device_details, parse_device_list_protobuf
 from SpotApi.UploadPrecomputedPublicKeyIds.upload_precomputed_public_key_ids import refresh_custom_trackers
-from webui import device_location_store, scheduler, settings_store
+from webui import demo_data, demo_mode, device_location_store, scheduler, settings_store
 from webui.auth_state import is_logged_in
 from webui.deps import run_blocking
 from webui.device_list_cache import device_list_cache
@@ -127,13 +127,21 @@ def _next_poll_str(canonic_id: str) -> str | None:
 
 
 async def get_devices() -> list[dict]:
-    def _fetch():
-        result_hex = request_device_list()
-        device_list = parse_device_list_protobuf(result_hex)
-        refresh_custom_trackers(device_list)
-        return get_device_details(device_list)
+    # Two independent triggers (see webui/demo_mode.py): DEMO_MODE=1 itself,
+    # or - the narrower case - a normal instance with no account signed in
+    # yet, shown as an onboarding placeholder. Short-circuits before any
+    # Nova/store call, not just before rendering, so neither ever reaches
+    # the real device-list fetch below.
+    if demo_mode.is_demo_mode() or demo_mode.devices_placeholder_active():
+        device_details = demo_data.demo_device_details()
+    else:
+        def _fetch():
+            result_hex = request_device_list()
+            device_list = parse_device_list_protobuf(result_hex)
+            refresh_custom_trackers(device_list)
+            return get_device_details(device_list)
 
-    device_details = await run_blocking(device_list_cache.get_or_fetch, _fetch)
+        device_details = await run_blocking(device_list_cache.get_or_fetch, _fetch)
     # Loaded once for the whole page, not per device - a page-load-time
     # display preference, not a per-device or per-endpoint setting (see
     # settings_store.py; unrelated to forwarding's own per-endpoint
@@ -224,7 +232,11 @@ def _map_devices_json(devices: list[dict]) -> str:
 
 @router.get("/devices/table")
 async def devices_table(request: Request):
-    if not is_logged_in():
+    # devices_placeholder_active() (see webui/demo_mode.py) deliberately does
+    # NOT flow through is_logged_in() - it's the "no account yet" case, not
+    # "logged in" - so it needs its own clause here rather than relying on
+    # the is_logged_in() gate alone.
+    if not is_logged_in() and not demo_mode.devices_placeholder_active():
         return templates.TemplateResponse(request, "_not_signed_in.html", {})
     devices = await get_devices()
     return templates.TemplateResponse(

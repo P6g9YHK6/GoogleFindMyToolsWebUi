@@ -55,7 +55,7 @@ from NovaApi.ExecuteAction.LocateTracker.decrypt_locations import create_map_lin
 from NovaApi.ListDevices.nbe_list_devices import request_device_list
 from ProtoDecoders.decoder import custom_message_formatter, get_device_details, parse_device_list_protobuf
 from SpotApi.UploadPrecomputedPublicKeyIds.upload_precomputed_public_key_ids import refresh_custom_trackers
-from webui import config, settings_store, system_log_store
+from webui import config, demo_mode, settings_store, system_log_store
 from webui.auth_state import is_logged_in
 from webui.deps import locate_device_with_capture, run_blocking
 from webui.device_list_cache import device_list_cache
@@ -291,6 +291,16 @@ async def debug_export(
     # logs, a form body doesn't.
     if not include_live_query and not include_logs:
         return JSONResponse({"error": "Select at least one of Live query or Logs to export."}, status_code=400)
+
+    if include_live_query and demo_mode.is_demo_mode():
+        # A live query does a real, uncached device-list + locate-all
+        # against Google's backend (see _fetch_device_list_debug/_locate_all
+        # above) - disabled outright in demo mode rather than faked, same
+        # reasoning as Firmware Build (webui/firmware_build.py). A logs-only
+        # export (include_live_query off) is unaffected - it only reads the
+        # already demo-aware log stores, see webui/forwarders/log_store.py/
+        # webui/system_log_store.py.
+        return JSONResponse({"error": "Live API query is disabled on this demo instance."}, status_code=400)
 
     device_list_debug = None
     locate_results: dict = {}

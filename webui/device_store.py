@@ -21,7 +21,7 @@ import json
 import threading
 from collections.abc import Callable
 
-from webui import config
+from webui import config, demo_data, demo_mode
 from webui.yaml_io import read_yaml_dict, write_yaml_dict
 
 _lock = threading.Lock()
@@ -30,6 +30,8 @@ _last_load_ok = True
 
 
 def last_load_ok() -> bool:
+    if demo_mode.is_demo_mode():
+        return True
     return _last_load_ok
 
 
@@ -108,11 +110,18 @@ def _save_unlocked(data: dict):
 
 
 def load() -> dict:
+    if demo_mode.is_demo_mode():
+        # A fresh copy of the fixed seed every call, never the real file -
+        # see webui/demo_data.py's module docstring for why this alone is
+        # what makes a demo visitor's write echo back for one response only.
+        return copy.deepcopy(demo_data.demo_devices_store())
     with _lock:
         return _load_unlocked()
 
 
 def save(data: dict):
+    if demo_mode.is_demo_mode():
+        return  # hard no-op - see load() above
     with _lock:
         _save_unlocked(data)
 
@@ -122,6 +131,15 @@ def mutate_device(canonic_id: str, fn: Callable[[dict], None]) -> dict:
     the entry (a fresh copy, safe to modify in place) - only persists if fn
     actually changed something, and drops the entry entirely if fn leaves it
     empty. Returns the entry after fn runs."""
+    if demo_mode.is_demo_mode():
+        # Mutates a throwaway copy of the fixed seed - never written
+        # anywhere, and never shared with the next request either (that
+        # request's own load()/mutate_device() starts over from the same
+        # seed) - see load() above and webui/demo_mode.py.
+        devices = demo_data.demo_devices_store()["devices"]
+        entry = copy.deepcopy(devices.get(canonic_id) or {})
+        fn(entry)
+        return entry
     with _lock:
         data = _load_unlocked()
         devices = data.setdefault("devices", {})
@@ -142,6 +160,10 @@ def mutate_devices(fn: Callable[[dict], None]) -> dict:
     directly, in one locked read-modify-write pass - for operations that
     touch more than one device at once (e.g. config_store.save()'s
     full-replace), instead of one mutate_device() round trip per device."""
+    if demo_mode.is_demo_mode():
+        devices = demo_data.demo_devices_store()["devices"]
+        fn(devices)
+        return devices
     with _lock:
         data = _load_unlocked()
         devices = data.setdefault("devices", {})

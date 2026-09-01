@@ -34,6 +34,7 @@
     {% if build_branch %} ({{ build_branch }}){% endif %}
     {% if build_date %}&middot; {{ build_date }}{% endif %}
     &middot; up {{ uptime_str }}
+    {% if demo_mode %}&middot; <span title="This instance is showing fake demo data, not a real account">🚩 Demo</span>{% endif %}
     &middot; <a href="https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi" target="_blank" rel="noopener">Source</a>
   </footer>
   <script src="/static/app.js"></script>

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 
 from NovaApi.ListDevices.nbe_list_devices import request_device_list
 from ProtoDecoders.decoder import get_device_details, parse_device_list_protobuf
-from webui import staleness
+from webui import demo_data, demo_mode, staleness
 from webui.auth_state import is_logged_in
 from webui.deps import run_blocking
 from webui.device_list_cache import device_list_cache
@@ -29,12 +29,15 @@ async def _rows() -> list[dict]:
     devices.py's get_devices - both fetch through the same device_list_cache
     slot, so this has to ask for the same shape too (see either of those
     for why)."""
-    def _fetch():
-        result_hex = request_device_list()
-        device_list = parse_device_list_protobuf(result_hex)
-        return get_device_details(device_list)
+    if demo_mode.is_demo_mode():
+        device_details = demo_data.demo_device_details()
+    else:
+        def _fetch():
+            result_hex = request_device_list()
+            device_list = parse_device_list_protobuf(result_hex)
+            return get_device_details(device_list)
 
-    device_details = await run_blocking(device_list_cache.get_or_fetch, _fetch)
+        device_details = await run_blocking(device_list_cache.get_or_fetch, _fetch)
     devices = config_store.all_devices()
 
     rows = []

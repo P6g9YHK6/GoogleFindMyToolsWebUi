@@ -26,7 +26,7 @@ import re
 import shutil
 import tempfile
 
-from webui import config, esp_idf_provisioning
+from webui import config, demo_mode, esp_idf_provisioning
 from webui.ws import firmware_manager
 
 logger = logging.getLogger("webui.firmware_build")
@@ -78,6 +78,13 @@ def is_active() -> bool:
 async def start(board: str, eid_hex: str, device_name: str = "GFMT Tracker",
                  adv_interval_ms: int = 20, tx_power_dbm: int = 9,
                  tracking_protection: bool = True) -> dict:
+    if demo_mode.is_demo_mode():
+        # Real git clone + ~1-2GB toolchain download + real subprocess
+        # compilation + real disk writes - too heavy/real to fake, so this
+        # is disabled outright rather than simulated (see
+        # webui/routers/firmware.py for the matching router-level guard;
+        # this one is defense-in-depth beyond it).
+        return {"started": False, "error": "Firmware builds are disabled on this demo instance."}
     if _state["phase"] in _ACTIVE_PHASES:
         return {"started": False, "state": get_state()}
 

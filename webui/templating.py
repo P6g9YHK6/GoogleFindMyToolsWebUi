@@ -4,7 +4,7 @@ import time
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
-from webui import config, scheduler
+from webui import config, demo_mode, scheduler
 from webui.colors import location_color
 
 BASE_DIR = pathlib.Path(__file__).parent
@@ -34,6 +34,17 @@ def _build_info(request: Request) -> dict:
         "build_date": config.GFMT_BUILD_DATE,
         "build_branch": config.GFMT_BUILD_BRANCH,
         "uptime_str": _format_uptime(time.monotonic() - config.APP_START_TIME),
+        # Small footer flag, not a banner - the one piece of UI chrome demo
+        # mode adds anywhere (see base.html). Deliberately DEMO_MODE=1 only,
+        # not devices_placeholder_active() too - that trigger is scoped to
+        # the Devices page alone (see webui/demo_mode.py), and this context
+        # processor runs on every page. Showing "Demo" in, say, the Settings
+        # page's footer just because no account is signed in yet would be
+        # actively misleading there, since that page shows its normal
+        # not-signed-in state, not fake data. Also what auth/login.html and
+        # firmware/page.html read to disable their own real-action buttons,
+        # with no router needing to pass this along by hand.
+        "demo_mode": demo_mode.is_demo_mode(),
     }
 
 

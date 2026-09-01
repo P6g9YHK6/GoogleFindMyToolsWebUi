@@ -40,6 +40,7 @@ os.environ.pop("GFMT_TLS_CERT_PATH", None)
 os.environ.pop("GFMT_TLS_KEY_PATH", None)
 os.environ.pop("GFMT_TLS_SAN", None)
 os.environ.pop("APPRISE_URLS", None)  # deterministic: no real notifications fired from tests
+os.environ.pop("DEMO_MODE", None)  # deterministic: demo mode off unless a test explicitly enables it
 
 import pytest  # noqa: E402
 from starlette.testclient import TestClient  # noqa: E402
@@ -55,6 +56,7 @@ def stub_backend(monkeypatch):
     """Sane defaults for every router's external-service boundary, so most
     tests get a working "happy path" for free and only override what they
     specifically care about."""
+    from webui import demo_mode
     from webui.device_list_cache import device_list_cache
     from webui.forwarders import settings_service
     from webui.routers import auth, devices, firmware, locate, logs, register, settings, sound
@@ -76,6 +78,16 @@ def stub_backend(monkeypatch):
 
     for mod in (devices, firmware, settings, logs, staleness_router):
         monkeypatch.setattr(mod, "is_logged_in", lambda: True)
+    # webui/demo_mode.py's devices_placeholder_active() looks up the real
+    # webui.auth_state.is_logged_in() (its own bound name - see that
+    # module), not any router's stubbed one above - without this, it reads
+    # the real (unstubbed, always-False-in-tests, no real credentials ever
+    # cached here) check and treats every test as "no account configured
+    # yet", making webui/routers/devices.py's get_devices() always return
+    # the fake demo dataset instead of this fixture's own stubbed device.
+    # Demo-mode tests (tests/test_demo_mode.py) override this back to False
+    # explicitly where they need to.
+    monkeypatch.setattr(demo_mode, "is_logged_in", lambda: True)
     # settings.py's own fetch-and-parse logic lives in settings_service.py
     # now (see webui/forwarders/settings_service.py) - patch there instead
     # of on the router module itself.

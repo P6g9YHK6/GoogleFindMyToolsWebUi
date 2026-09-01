@@ -8,7 +8,7 @@ YAML, just tab-separated fields parsed back on read).
 import re
 import threading
 
-from webui import config
+from webui import config, demo_data, demo_mode
 from webui.line_log_io import append_line, read_lines, write_lines
 
 _lock = threading.Lock()
@@ -57,6 +57,13 @@ def append(level: str, logger_name: str, message: str, when: int):
 
 def recent_entries(limit: int = 500) -> list[dict]:
     """Newest first."""
+    if demo_mode.is_demo_mode():
+        # The Logs page always shows this fixed, canned history in demo mode
+        # (see webui/demo_data.py) rather than this process's own real
+        # operational log - append() below is deliberately left writing
+        # normally regardless, so the operator running a public instance
+        # still gets real logs in `docker logs`/system.log.
+        return demo_data.demo_system_log_entries()[:limit]
     with _lock:
         entries = _read_all()
     return list(reversed(entries))[:limit]

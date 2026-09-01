@@ -5,7 +5,7 @@ from NovaApi.ExecuteAction.LocateTracker.location_request import get_location_da
 from NovaApi.ExecuteAction.PlaySound.sound_action import play_sound
 from NovaApi.query_throttle import query_throttle
 from SpotApi.CreateBleDevice.create_ble_device import register_esp32
-from webui import config, settings_store
+from webui import config, demo_data, demo_mode, settings_store
 from webui.device_list_cache import device_list_cache
 from webui.locate_coalescer import locate_coalescer
 
@@ -49,6 +49,9 @@ async def run_blocking(func, *args, **kwargs):
 
 
 async def locate_device(canonic_id: str, name: str, timeout: float = config.LOCATE_TIMEOUT_S):
+    if demo_mode.is_demo_mode():
+        return demo_data.fake_locate_result(canonic_id)
+
     # Coalesced per canonic_id (see webui/locate_coalescer.py) - if a locate
     # for this device is already in flight (e.g. a cron poll tick and a
     # manual click landing at the same moment), this call joins it instead
@@ -77,6 +80,12 @@ async def locate_device_with_capture(canonic_id: str, name: str, timeout: float 
 
     Returns (locations, capture).
     """
+    if demo_mode.is_demo_mode():
+        # Defense-in-depth only - the one real caller, webui/routers/
+        # debug_export.py, is blocked outright before this would ever run
+        # in demo mode (a live-query export is disabled entirely, not
+        # faked - see that router).
+        return demo_data.fake_locate_with_capture_result(canonic_id)
     capture: dict = {}
     async with _locate_semaphore:
         locations = await run_blocking(get_location_data_for_device, canonic_id, name, timeout, capture)
@@ -84,6 +93,8 @@ async def locate_device_with_capture(canonic_id: str, name: str, timeout: float 
 
 
 async def set_sound(canonic_id: str, should_start: bool):
+    if demo_mode.is_demo_mode():
+        return demo_data.fake_sound_result(should_start)
     return await run_blocking(play_sound, canonic_id, should_start)
 
 
@@ -95,6 +106,12 @@ async def register_tracker(
     image_url: str = "https://docs.espressif.com/projects/esp-idf/en/v4.3/esp32/_images/esp32-DevKitM-1-isometric.png",
     experimental_official_app_compat: bool = False,
 ):
+    if demo_mode.is_demo_mode():
+        return demo_data.fake_register_result(
+            display_name=display_name, device_type=device_type, manufacturer_name=manufacturer_name,
+            model_name=model_name, image_url=image_url,
+            experimental_official_app_compat=experimental_official_app_compat,
+        )
     result = await run_blocking(
         register_esp32, display_name=display_name, device_type=device_type,
         manufacturer_name=manufacturer_name, model_name=model_name, image_url=image_url,

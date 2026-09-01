@@ -5,7 +5,7 @@ from datetime import datetime
 
 from croniter import croniter
 
-from webui import device_location_store, settings_store, ws
+from webui import demo_mode, device_location_store, settings_store, ws
 from webui.auth_state import is_logged_in
 from webui.deps import locate_device
 from webui.forwarders import config_store, latest_values_store, log_store, semantic_map
@@ -284,6 +284,13 @@ def restart_device(canonic_id: str):
     existing = _tasks.pop(canonic_id, None)
     if existing:
         existing.cancel()
+
+    if demo_mode.is_demo_mode():
+        # A demo visitor saving a device with endpoints must not spawn a
+        # real (if harmless - every call it would make is itself demo-aware)
+        # background polling task - see webui/main.py's lifespan, which
+        # already skips start_all() for the same reason.
+        return
 
     device_cfg = config_store.get_device_config(canonic_id)
     if device_cfg and device_cfg.get("endpoints"):

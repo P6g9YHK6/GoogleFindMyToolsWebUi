@@ -8,7 +8,7 @@ present yet changes nothing.
 import os
 import threading
 
-from webui import config
+from webui import config, demo_mode
 from webui.yaml_io import read_yaml_dict, write_yaml_dict
 
 _lock = threading.Lock()
@@ -48,8 +48,13 @@ def _defaults() -> dict:
 
 
 def load() -> dict:
+    defaults = _defaults()
+    if demo_mode.is_demo_mode():
+        # Never reads config.yaml - a visitor's App Settings save (see
+        # webui/routers/auth.py) is echoed back to that one request's
+        # response only, never actually persisted (see save() below).
+        return defaults
     with _lock:
-        defaults = _defaults()
         data, ok = read_yaml_dict(config.APP_SETTINGS_PATH)
         if not ok:
             return defaults
@@ -58,6 +63,8 @@ def load() -> dict:
 
 
 def save(data: dict):
+    if demo_mode.is_demo_mode():
+        return  # hard no-op - see load() above
     with _lock:
         write_yaml_dict(config.APP_SETTINGS_PATH, data)
 

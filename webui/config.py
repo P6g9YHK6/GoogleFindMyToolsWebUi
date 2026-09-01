@@ -61,6 +61,13 @@ HTTP_PASSWORD = os.environ.get("HTTP_PASSWORD")
 # HTTPS_ENABLED=0 can't accidentally enable it. Unset by default - see
 # README.
 HTTPS_ENABLED = os.environ.get("HTTPS_ENABLED") == "1"
+
+# Public-showcase demo mode - see webui/demo_mode.py, webui/demo_data.py and
+# the README's "Demo mode" section. Every page shows a fixed fake dataset,
+# real Google login and every outbound network call are disabled, and no
+# visitor write is ever persisted to disk. Same exact "1" convention as
+# HTTPS_ENABLED above. Unset by default.
+DEMO_MODE = os.environ.get("DEMO_MODE") == "1"
 # Bring-your-own-cert escape hatch - if either is set, webui/tls.py requires
 # both files to actually exist (fails loudly rather than silently falling
 # back to a self-signed cert the operator didn't ask for). Unset means
@@ -156,3 +163,11 @@ GFMT_BUILD_BRANCH = os.environ.get("GFMT_BUILD_BRANCH", "")
 # Process start time, for the footer's uptime display and /metrics'
 # gfmt_uptime_seconds (webui/routers/metrics.py) - one clock, two consumers.
 APP_START_TIME = time.monotonic()
+
+# Low-level, process-wide backstop for DEMO_MODE - see
+# webui/demo_network_guard.py's module docstring for why this lives here
+# (imported before virtually everything else) rather than in webui/main.py's
+# lifespan. A no-op when DEMO_MODE is unset.
+from webui import demo_network_guard  # noqa: E402
+
+demo_network_guard.install(DEMO_MODE)

@@ -7,7 +7,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 from websockets.exceptions import ConnectionClosed
 
-from webui import config
+from webui import config, demo_mode
 
 logger = logging.getLogger("webui.vnc_proxy")
 
@@ -21,6 +21,12 @@ async def proxy_static(path: str):
     """Reverse-proxies the browser container's noVNC static assets (vnc.html,
     app/, core/, ...) through the web UI's own origin, so the embedded Chrome
     login view is part of this app rather than a separately exposed port."""
+    if demo_mode.is_demo_mode():
+        # This route must be categorically dead in demo mode, not just
+        # unreached - nothing upstream ever triggers it (real login is
+        # blocked at webui/routers/auth.py and webui/browser_provisioning.py
+        # already), but a public instance must refuse it outright too.
+        return Response(status_code=404)
     upstream = await _http_client.get(f"{config.BROWSER_NOVNC_URL}/{path}", timeout=10)
     return Response(
         content=upstream.content,
@@ -32,6 +38,9 @@ async def proxy_static(path: str):
 @router.websocket("/websockify")
 async def proxy_websocket(websocket: WebSocket):
     """Relays the noVNC/websockify WebSocket through the web UI's own origin."""
+    if demo_mode.is_demo_mode():
+        await websocket.close(code=1008)  # policy violation - see proxy_static above
+        return
     ws_url = config.BROWSER_NOVNC_URL.replace("http://", "ws://").replace("https://", "wss://") + "/websockify"
     requested_subprotocols = websocket.scope.get("subprotocols") or None
 

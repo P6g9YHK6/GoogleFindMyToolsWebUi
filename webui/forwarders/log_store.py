@@ -3,7 +3,7 @@ import re
 import threading
 import time
 
-from webui import config
+from webui import config, demo_data, demo_mode
 from webui.line_log_io import append_line, read_lines, write_lines
 
 _lock = threading.Lock()
@@ -99,6 +99,11 @@ def append(
     canonic_id: str, device_name: str, endpoint_type: str, target: str, status: str,
     payload: str = "", response: str = "",
 ):
+    if demo_mode.is_demo_mode():
+        # A "Send now" click in demo mode must never write a real entry to
+        # shared disk - see webui/demo_mode.py. recent_entries() below
+        # already serves a fixed, canned log regardless.
+        return
     with _lock:
         if not config.FORWARD_LOG_PATH.exists():
             # Materializes the file (migrated from forward_log.json) if
@@ -120,6 +125,8 @@ def append(
 
 def recent_entries(limit: int = 500) -> list[dict]:
     """Newest first."""
+    if demo_mode.is_demo_mode():
+        return demo_data.demo_forward_log_entries()[:limit]
     with _lock:
         entries = _read_all()
     return list(reversed(entries))[:limit]

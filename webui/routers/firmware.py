@@ -4,6 +4,7 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from webui import (
+    demo_mode,
     firmware_build,
     firmware_store,
     flash_presets,
@@ -62,6 +63,11 @@ async def firmware_build_start(
     eid_hex = eid_hex.strip()
     device_name = device_name.strip()
     protection = tracking_protection == "1"
+    if demo_mode.is_demo_mode():
+        # Router-level guard, on top of firmware_build.start()'s own - see
+        # that module for why Firmware Build is disabled outright in demo
+        # mode rather than simulated.
+        return {"started": False, "error": "Firmware builds are disabled on this demo instance."}
     result = await firmware_build.start(board, eid_hex, device_name, adv_interval_ms,
                                          tx_power_dbm, protection)
     if result.get("started"):

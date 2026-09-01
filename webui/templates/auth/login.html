@@ -11,10 +11,11 @@
 
 <div id="queue-status" hx-get="/auth/queue" hx-trigger="load, every 2s" hx-swap="innerHTML"></div>
 
-<button id="signin-btn">Sign in with Google</button>
+<button id="signin-btn" {% if demo_mode %}disabled title="Sign-in is disabled on this demo instance"{% endif %}>Sign in with Google</button>
 <button hx-get="/auth/status" hx-target="#login-status" hx-swap="innerHTML">Refresh status</button>
 <button id="clear-btn" class="btn-outline-danger" hx-post="/auth/clear" hx-target="#login-status" hx-swap="innerHTML"
-        hx-confirm="Clear all saved credentials? You'll need to sign in again.">
+        hx-confirm="Clear all saved credentials? You'll need to sign in again."
+        {% if demo_mode %}disabled title="Nothing real to clear on this demo instance"{% endif %}>
   Clear credentials
 </button>
 
@@ -46,7 +47,9 @@
    archive before sharing it.</p>
 
 <div class="checkbox-stack">
-  <label class="checkbox-label"><input type="checkbox" id="debug-export-include-live" checked>
+  <label class="checkbox-label"><input type="checkbox" id="debug-export-include-live"
+    {% if demo_mode %}title="Disabled on this demo instance"{% else %}checked{% endif %}
+    {% if demo_mode %}disabled{% endif %}>
     Live API query (fresh device list + locate every device)</label>
   <label class="checkbox-label"><input type="checkbox" id="debug-export-include-logs"> Recent app logs</label>
   <label class="checkbox-label"><input type="checkbox" id="debug-export-anonymize">
