@@ -22,12 +22,16 @@ import time
 
 import pytest
 
+from Auth.firebase_messaging import FcmPushClientRunState
+
 
 @pytest.fixture
 def receiver(monkeypatch):
     """A real FcmReceiver instance with __init__'s network-touching bits
     (get_cached_value, FcmPushClient) stubbed out, and _listening starting
-    False so _ensure_listening() actually has something to guard."""
+    False so _ensure_listening() actually has something to guard. pc.run_state
+    defaults to STARTED - the healthy, already-listening state - since
+    _listener_dead() now reads it too."""
     from Auth import fcm_receiver as fcm_receiver_module
 
     monkeypatch.setattr(fcm_receiver_module, "get_cached_value", lambda name: {"gcm": {"android_id": "abc123"}})
@@ -36,6 +40,7 @@ def receiver(monkeypatch):
     fcm_receiver_module.FcmReceiver._instance = None
     r = fcm_receiver_module.FcmReceiver()
     r._listening = False
+    r.pc.run_state = FcmPushClientRunState.STARTED
     yield r
     fcm_receiver_module.FcmReceiver._instance = None
 
@@ -97,6 +102,23 @@ def test_register_for_location_updates_and_get_fcm_token_use_the_guard(receiver,
     receiver.get_fcm_token()
 
     assert calls == [1, 1]
+
+
+@pytest.mark.parametrize("dead_state", [FcmPushClientRunState.STOPPING, FcmPushClientRunState.STOPPED])
+def test_ensure_listening_restarts_after_the_push_client_dies(receiver, monkeypatch, dead_state):
+    """Regression test: FcmPushClient shuts itself down after 3 sequential
+    connection errors (see fcmpushclient.py's abort_on_sequential_error_count)
+    and never recovers on its own - _listening alone stayed True forever
+    after the first successful start, so every locate after such a crash
+    used to sit waiting on a listener that was actually long dead."""
+    receiver._listening = True
+    receiver.pc.run_state = dead_state
+
+    start_calls = []
+    monkeypatch.setattr(receiver, "_start_listener_in_background", lambda: start_calls.append(1) or "restarted-id")
+
+    assert receiver._ensure_listening() == "restarted-id"
+    assert start_calls == [1]
 
 
 def test_get_android_id_only_guards_when_credentials_are_missing(receiver, monkeypatch):

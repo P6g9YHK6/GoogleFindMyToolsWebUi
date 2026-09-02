@@ -4,7 +4,7 @@ import binascii
 import logging
 import threading
 
-from Auth.firebase_messaging import FcmPushClient, FcmRegisterConfig
+from Auth.firebase_messaging import FcmPushClient, FcmPushClientRunState, FcmRegisterConfig
 from Auth.token_cache import get_cached_value, set_cached_value
 
 logger = logging.getLogger(__name__)
@@ -55,12 +55,24 @@ class FcmReceiver:
         self.pc = FcmPushClient(self._on_notification, fcm_config, self.credentials, self._on_credentials_updated)
 
 
+    def _listener_dead(self) -> bool:
+        """True once the FcmPushClient has shut itself down on its own -
+        e.g. after 3 sequential connection errors (see fcmpushclient.py's
+        abort_on_sequential_error_count) - which it never recovers from by
+        itself. self._listening alone can't tell: it's only ever set once,
+        at the first successful start, so without this every locate after
+        such a crash would sit waiting on a listener that's actually long
+        dead until the whole process is restarted by hand."""
+        return self.pc.run_state in (FcmPushClientRunState.STOPPING, FcmPushClientRunState.STOPPED)
+
     def _ensure_listening(self):
-        """Starts the background FCM listener exactly once, even if several
-        callers race to be the first one that needs it - e.g. two devices'
-        polls landing close together, which is the common case right after
-        a restart (every device's schedule is freshly evaluated at once).
-        The bare `if not self._listening: self._start_listener_in_background()`
+        """Starts the background FCM listener if it isn't already running -
+        either because it's never been started, or because it died (see
+        _listener_dead) - even if several callers race to be the first one
+        that needs it, e.g. two devices' polls landing close together,
+        which is the common case right after a restart (every device's
+        schedule is freshly evaluated at once). The bare
+        `if not self._listening: self._start_listener_in_background()`
         this replaced let two callers both see False and both start a
         listener concurrently against the same shared self.pc, corrupting
         its internal connection state - observed in production as
@@ -70,10 +82,10 @@ class FcmReceiver:
         either way, matching what _start_listener_in_background() itself
         returns, so get_android_id() below can use this as its one path
         regardless of whether this call actually started anything."""
-        if self._listening:
+        if self._listening and not self._listener_dead():
             return self.credentials['gcm']['android_id']
         with self._start_lock:
-            if self._listening:
+            if self._listening and not self._listener_dead():
                 return self.credentials['gcm']['android_id']
             return self._start_listener_in_background()
 
@@ -184,7 +196,16 @@ class FcmReceiver:
         self._loop.run_forever()
 
     def _start_listener_in_background(self):
-        """Start FCM listener in a background thread with its own event loop"""
+        """Start FCM listener in a background thread with its own event
+        loop. Also the recovery path after a dead listener (see
+        _listener_dead) - tears down the previous loop/thread first, or
+        they'd leak, spinning forever in the background with nothing left
+        to do once self.pc has already shut itself down."""
+        if self._loop and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._loop.stop)
+            if self._loop_thread:
+                self._loop_thread.join(timeout=5)
+
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._run_event_loop_in_thread, daemon=True)
         self._loop_thread.start()
