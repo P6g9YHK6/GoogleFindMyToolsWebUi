@@ -5,8 +5,9 @@ from NovaApi.ExecuteAction.LocateTracker.location_request import get_location_da
 from NovaApi.ExecuteAction.PlaySound.sound_action import play_sound
 from NovaApi.query_throttle import query_throttle
 from SpotApi.CreateBleDevice.create_ble_device import register_esp32
-from webui import config, settings_store
+from webui import config, demo_data, demo_mode, settings_store
 from webui.device_list_cache import device_list_cache
+from webui.locate_coalescer import locate_coalescer
 
 _locate_semaphore = asyncio.Semaphore(config.LOCATE_CONCURRENCY)
 
@@ -48,16 +49,74 @@ async def run_blocking(func, *args, **kwargs):
 
 
 async def locate_device(canonic_id: str, name: str, timeout: float = config.LOCATE_TIMEOUT_S):
+    if demo_mode.is_demo_mode():
+        return demo_data.fake_locate_result(canonic_id)
+
+    # Coalesced per canonic_id (see webui/locate_coalescer.py) - if a locate
+    # for this device is already in flight (e.g. a cron poll tick and a
+    # manual click landing at the same moment), this call joins it instead
+    # of starting a second Nova+FCM round trip. The semaphore is acquired
+    # inside the coalesced fetch, so it's only held once per actual fetch,
+    # not once per caller.
+    async def _fetch():
+        async with _locate_semaphore:
+            return await run_blocking(get_location_data_for_device, canonic_id, name, timeout)
+
+    return await locate_coalescer.get_or_fetch(canonic_id, _fetch)
+
+
+async def locate_device_with_capture(canonic_id: str, name: str, timeout: float = config.LOCATE_TIMEOUT_S):
+    """Same underlying request as locate_device(), plus the raw hex/protobuf-
+    text behind the result (see get_location_data_for_device's `capture`
+    param) - for the debug export (webui/routers/debug_export.py), which
+    needs the wire payload itself, not just the decrypted locations.
+
+    Deliberately bypasses locate_coalescer: a caller joining someone else's
+    in-flight fetch would get back an empty capture dict, since only the
+    leader's call actually receives the FCM response. The debug export wants
+    its own guaranteed real fetch instead, so it goes straight through the
+    semaphore (same concurrency ceiling as every other locate path) without
+    coalescing.
+
+    Returns (locations, capture).
+    """
+    if demo_mode.is_demo_mode():
+        # Defense-in-depth only - the one real caller, webui/routers/
+        # debug_export.py, is blocked outright before this would ever run
+        # in demo mode (a live-query export is disabled entirely, not
+        # faked - see that router).
+        return demo_data.fake_locate_with_capture_result(canonic_id)
+    capture: dict = {}
     async with _locate_semaphore:
-        return await run_blocking(get_location_data_for_device, canonic_id, name, timeout)
+        locations = await run_blocking(get_location_data_for_device, canonic_id, name, timeout, capture)
+    return locations, capture
 
 
 async def set_sound(canonic_id: str, should_start: bool):
+    if demo_mode.is_demo_mode():
+        return demo_data.fake_sound_result(should_start)
     return await run_blocking(play_sound, canonic_id, should_start)
 
 
-async def register_tracker():
-    result = await run_blocking(register_esp32)
+async def register_tracker(
+    display_name: str = "GoogleFindMyTools µC",
+    device_type: str = "DEVICE_TYPE_BEACON",
+    manufacturer_name: str = "GoogleFindMyTools",
+    model_name: str = "µC",
+    image_url: str = "https://docs.espressif.com/projects/esp-idf/en/v4.3/esp32/_images/esp32-DevKitM-1-isometric.png",
+    experimental_official_app_compat: bool = False,
+):
+    if demo_mode.is_demo_mode():
+        return demo_data.fake_register_result(
+            display_name=display_name, device_type=device_type, manufacturer_name=manufacturer_name,
+            model_name=model_name, image_url=image_url,
+            experimental_official_app_compat=experimental_official_app_compat,
+        )
+    result = await run_blocking(
+        register_esp32, display_name=display_name, device_type=device_type,
+        manufacturer_name=manufacturer_name, model_name=model_name, image_url=image_url,
+        experimental_official_app_compat=experimental_official_app_compat,
+    )
     # register_esp32() raises on failure rather than returning a sentinel,
     # so getting here already means success - invalidate the device-list
     # cache (see webui/device_list_cache.py) so the newly-registered

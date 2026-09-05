@@ -8,9 +8,8 @@ present yet changes nothing.
 import os
 import threading
 
-import yaml
-
-from webui import config
+from webui import config, demo_mode
+from webui.yaml_io import read_yaml_dict, write_yaml_dict
 
 _lock = threading.Lock()
 
@@ -29,31 +28,45 @@ def _defaults() -> dict:
         # toggle (webui/forwarders/policy.py) - this is purely a display
         # preference, not tied to any endpoint's config.
         "devices_page_most_recent_only": True,
+        # How often webui/staleness.py's independent background sweep
+        # re-checks every device's last-known fix age - separate from any
+        # device's own cron schedule (see that module's own docstring for
+        # why it has to be). Applies live, same as the throttle settings
+        # above - no restart needed.
+        "staleness_sweep_interval_s": 3600,
+        # Fixed coordinates for named SEMANTIC locations (e.g. "Nest Mini -
+        # Living Room") - Google never reports lat/lon for these, so without
+        # an entry here they're skipped by every forwarder (see
+        # webui/forwarders/semantic_map.py). Global rather than per-device:
+        # a named smart-home device's position doesn't change depending on
+        # which tracker reports being near it. {name: {"latitude": float,
+        # "longitude": float, "match_mode": "full"|"partial"}}. match_mode
+        # defaults to "full" (exact match) when absent, so entries saved
+        # before this field existed keep behaving the same way.
+        "semantic_location_map": {},
     }
 
 
 def load() -> dict:
+    defaults = _defaults()
+    if demo_mode.is_demo_mode():
+        # Never reads config.yaml - a visitor's App Settings save (see
+        # webui/routers/auth.py) is echoed back to that one request's
+        # response only, never actually persisted (see save() below).
+        return defaults
     with _lock:
-        config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-        defaults = _defaults()
-        if not config.APP_SETTINGS_PATH.exists():
-            return defaults
-        try:
-            with open(config.APP_SETTINGS_PATH) as f:
-                data = yaml.safe_load(f)
-        except (yaml.YAMLError, OSError):
-            return defaults
-        if not isinstance(data, dict):
+        data, ok = read_yaml_dict(config.APP_SETTINGS_PATH)
+        if not ok:
             return defaults
         defaults.update(data)
         return defaults
 
 
 def save(data: dict):
+    if demo_mode.is_demo_mode():
+        return  # hard no-op - see load() above
     with _lock:
-        config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-        with open(config.APP_SETTINGS_PATH, "w") as f:
-            yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+        write_yaml_dict(config.APP_SETTINGS_PATH, data)
 
 
 def apprise_env() -> dict:

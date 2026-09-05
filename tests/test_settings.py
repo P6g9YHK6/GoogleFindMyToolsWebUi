@@ -30,6 +30,118 @@ def test_blank_endpoint_route(client):
     assert 'name="ep-__NEW__-url"' in resp.text
 
 
+def _sync_device_meta(client, monkeypatch, **detail_overrides):
+    """Loads /settings once with a stubbed get_device_details so this
+    device's device_meta ends up persisted into forwarding.yaml exactly as
+    given - mirrors test_settings_page_load_syncs_device_metadata_into_
+    forwarding_yaml's own monkeypatch, since a plain config_store.
+    set_device_config(..., device_meta=...) would just get overwritten by
+    the next page load's sync (see webui/routers/settings.py's _rows).
+    The device must already have a saved config entry first - the sync
+    only ever updates an existing one, never creates one (same rule
+    google_name's own sync follows - see
+    test_settings_page_load_does_not_create_a_config_entry_for_an_unsaved_device)."""
+    from webui.forwarders import config_store, settings_service
+
+    if config_store.get_device_config(FAKE_CANONIC_ID) is None:
+        # At least one endpoint, or _device_form.html's endpoint loop never
+        # runs at all and there's no chip row to assert on either way.
+        config_store.set_device_config(FAKE_CANONIC_ID, {
+            "display_name": "", "endpoints": [{
+                "method": "GET", "url": "http://x/", "headers": {}, "body_type": "none", "body": "",
+                "cron": "0 0 1 1 *",
+            }],
+        })
+
+    detail = {
+        "name": FAKE_DEVICE_NAME, "canonic_id": FAKE_CANONIC_ID, "last_seen": None,
+        "is_phone": False, "image_url": "", "device_type": "DEVICE_TYPE_KEYS", "type_id": 3,
+        "manufacturer": "", "model": "", "carrier": None, "codename": None,
+        "imei": None, "registered_at": None, "access": [],
+    }
+    detail.update(detail_overrides)
+    monkeypatch.setattr(settings_service, "get_device_details", lambda device_list: [detail])
+    assert client.get("/settings").status_code == 200
+
+
+def test_settings_page_shows_a_label_chip_only_for_a_field_this_device_has(client, monkeypatch):
+    _sync_device_meta(client, monkeypatch, is_phone=True, carrier="T-Mobile", imei="354935091234567")
+
+    resp = client.get(f"/settings/devices/{FAKE_CANONIC_ID}")
+    assert resp.status_code == 200
+    assert 'data-var="label_carrier"' in resp.text
+    assert 'data-var="label_imei"' in resp.text
+    assert 'data-var="label_codename"' not in resp.text  # blank for this device - not offered
+
+
+def test_settings_page_shows_no_label_chips_for_a_non_phone_device(client, monkeypatch):
+    _sync_device_meta(client, monkeypatch)  # is_phone=False, every phone-only field blank
+
+    resp = client.get(f"/settings/devices/{FAKE_CANONIC_ID}")
+    assert resp.status_code == 200
+    for name in ("label_carrier", "label_codename", "label_imei", "label_registered_at", "label_shared_with"):
+        assert f'data-var="{name}"' not in resp.text
+
+
+def test_blank_endpoint_route_reflects_this_devices_label_chips(client, monkeypatch):
+    _sync_device_meta(client, monkeypatch, is_phone=True, carrier="T-Mobile")
+
+    resp = client.get(f"/settings/devices/{FAKE_CANONIC_ID}/endpoints/blank")
+    assert resp.status_code == 200
+    assert 'data-var="label_carrier"' in resp.text
+
+
+def test_send_now_route_reflects_this_devices_label_chips(client, monkeypatch):
+    from webui import scheduler
+
+    _sync_device_meta(client, monkeypatch, is_phone=True, carrier="T-Mobile")  # sets up endpoint 0 too
+
+    async def fake_locate_device(canonic_id, name, timeout=None):
+        return [{"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}]
+
+    monkeypatch.setattr(scheduler, "locate_device", fake_locate_device)
+    monkeypatch.setattr(scheduler, "_dispatch_forward", lambda cfg, loc, name="", alias=None, tracker_id="", device_meta=None, response_out=None: "ok")
+
+    resp = client.post(f"/settings/devices/{FAKE_CANONIC_ID}/endpoints/0/send-now")
+    assert resp.status_code == 200
+    assert 'data-var="label_carrier"' in resp.text
+
+
+def test_yaml_view_reflects_this_devices_label_chips(client, monkeypatch):
+    _sync_device_meta(client, monkeypatch, is_phone=True, carrier="T-Mobile")
+
+    resp = client.get(f"/settings/devices/{FAKE_CANONIC_ID}/yaml")
+    assert resp.status_code == 200
+    assert 'data-var="label_carrier"' in resp.text
+    assert 'data-var="label_codename"' not in resp.text  # blank for this device - not offered
+
+
+def test_yaml_preview_route_reflects_this_devices_label_chips(client, monkeypatch):
+    _sync_device_meta(client, monkeypatch, is_phone=True, carrier="T-Mobile")
+
+    resp = _post_form(client, f"/settings/devices/{FAKE_CANONIC_ID}/yaml/preview", display_name="Alice's phone")
+    assert resp.status_code == 200
+    assert 'data-var="label_carrier"' in resp.text
+
+
+def test_yaml_view_shows_label_chips_on_a_yaml_parse_error_too(client, monkeypatch):
+    _sync_device_meta(client, monkeypatch, is_phone=True, carrier="T-Mobile")
+
+    resp = _post_form(client, f"/settings/devices/{FAKE_CANONIC_ID}/yaml", yaml_text="not: valid: yaml: [")
+    assert resp.status_code == 200
+    assert "Invalid YAML" in resp.text
+    assert 'data-var="label_carrier"' in resp.text
+
+
+def test_edit_as_form_button_shows_label_chips_on_a_yaml_parse_error(client, monkeypatch):
+    _sync_device_meta(client, monkeypatch, is_phone=True, carrier="T-Mobile")
+
+    resp = _post_form(client, f"/settings/devices/{FAKE_CANONIC_ID}/form/preview", yaml_text="not: valid: yaml: [")
+    assert resp.status_code == 200
+    assert "Invalid YAML" in resp.text
+    assert 'data-var="label_carrier"' in resp.text
+
+
 def test_save_mixed_endpoints_and_drop_blank_block(client):
     resp = _post_form(
         client,
@@ -95,7 +207,12 @@ def test_save_shows_a_confirmation_toast(client):
     assert "save-toast" in resp.text
 
 
-def test_device_alias_overrides_confusing_google_name(client):
+def test_device_form_legend_always_shows_google_name_with_alias_shown_small(client):
+    """The heading is always the fixed Google account name, never the
+    alias - a heading that flipped to the alias once one was set left no
+    way to tell at a glance which device this actually is on the Google
+    account side. The alias still shows too, in small text right next to
+    it, rather than disappearing."""
     resp = _post_form(
         client,
         f"/settings/devices/{FAKE_CANONIC_ID}",
@@ -104,15 +221,153 @@ def test_device_alias_overrides_confusing_google_name(client):
         **{"ep-0-endpoint_type": "traccar", "ep-0-url": "http://x/", "ep-0-cron": "*/5 * * * *"},
     )
     assert resp.status_code == 200
-    assert "Garage Tracker" in resp.text
-    assert FAKE_DEVICE_NAME in resp.text  # hint pointing back at the underlying Google device name
+    assert f"<legend>{FAKE_DEVICE_NAME}" in resp.text
+    assert '<span class="endpoint-legend-text">(Garage Tracker)</span>' in resp.text
 
     from webui.forwarders import config_store
 
     assert config_store.get_device_config(FAKE_CANONIC_ID)["display_name"] == "Garage Tracker"
 
     page = client.get("/settings")
-    assert "Garage Tracker" in page.text
+    assert f"<legend>{FAKE_DEVICE_NAME}" in page.text
+    assert '<span class="endpoint-legend-text">(Garage Tracker)</span>' in page.text
+
+
+def test_device_form_legend_shows_only_the_google_name_when_no_alias_is_set(client):
+    """No _endpoint_fields.html-style false positive here: that partial
+    renders its own (always-present, often-empty) .endpoint-legend-text
+    span per endpoint, so this checks for the specific "(alias)"
+    parenthetical the device heading adds, not the bare class name."""
+    from webui.forwarders import config_store
+
+    config_store.set_device_config(FAKE_CANONIC_ID, {"display_name": "", "endpoints": [], "google_name": FAKE_DEVICE_NAME})
+
+    resp = client.get(f"/settings/devices/{FAKE_CANONIC_ID}")
+    assert resp.status_code == 200
+    assert f"<legend>{FAKE_DEVICE_NAME}" in resp.text
+    assert '<span class="endpoint-legend-text">(' not in resp.text
+
+
+def test_saving_the_form_does_not_wipe_google_name_when_the_device_drops_off_the_live_list(client, monkeypatch):
+    """Saving the form re-syncs google_name/device_meta from a fresh
+    device-list fetch same as any full page load does (see _rows) - but if
+    this device is temporarily missing from that one fetch (a transient
+    Nova hiccup, not the device actually being gone), that sync has
+    nothing to write back. The save itself must still carry forward
+    whatever was already on disk instead of just persisting
+    {display_name, endpoints} and leaving google_name/device_meta blank -
+    otherwise {{device_name}} would fall back to this device's alias, and
+    every label_* chip would disappear, until some later request happens
+    to see this device again."""
+    from webui.device_list_cache import device_list_cache
+    from webui.forwarders import config_store, settings_service
+
+    _sync_device_meta(client, monkeypatch, is_phone=True, carrier="T-Mobile")
+    device_list_cache.invalidate()  # or the next fetch below would just serve _sync_device_meta's cached result
+    monkeypatch.setattr(settings_service, "get_device_details", lambda device_list: [])
+
+    resp = _post_form(
+        client,
+        f"/settings/devices/{FAKE_CANONIC_ID}",
+        display_name="Garage Tracker",
+        ep_order=["0"],
+        **{"ep-0-endpoint_type": "traccar", "ep-0-url": "http://x/", "ep-0-cron": "*/5 * * * *"},
+    )
+    assert resp.status_code == 200
+
+    saved = config_store.get_device_config(FAKE_CANONIC_ID)
+    assert saved["display_name"] == "Garage Tracker"
+    assert saved["google_name"] == FAKE_DEVICE_NAME
+    assert saved["device_meta"]["carrier"] == "T-Mobile"
+
+
+def test_settings_page_load_syncs_device_metadata_into_forwarding_yaml(client, monkeypatch):
+    """webui/scheduler.py's poll loop never talks to Google's device-list
+    API itself - loading the settings page is what persists manufacturer/
+    model/etc into forwarding.yaml so {{manufacturer}}/{{model}}/{{type}}/
+    etc (see webui/forwarders/custom.py) have anywhere to read real values
+    from at forward time, same as google_name already does for
+    {{device_name}}."""
+    from webui.forwarders import config_store, settings_service
+
+    config_store.set_device_config(FAKE_CANONIC_ID, {"display_name": "My Tracker", "endpoints": []})
+
+    monkeypatch.setattr(settings_service, "get_device_details", lambda device_list: [{
+        "name": FAKE_DEVICE_NAME, "canonic_id": FAKE_CANONIC_ID, "last_seen": None,
+        "is_phone": False, "image_url": "https://x/p.png", "device_type": "DEVICE_TYPE_KEYS", "type_id": 3,
+        "manufacturer": "Chipolo", "model": "ONE Point", "carrier": None, "codename": None,
+        "imei": None, "registered_at": 1700000000,
+        "access": [
+            {"email": "me@example.com", "has_access": True, "is_owner": True, "this_account": True},
+            {"email": "family@example.com", "has_access": True, "is_owner": False, "this_account": False},
+        ],
+    }])
+
+    resp = client.get("/settings")
+    assert resp.status_code == 200
+
+    device_meta = config_store.get_device_config(FAKE_CANONIC_ID)["device_meta"]
+    assert device_meta["manufacturer"] == "Chipolo"
+    assert device_meta["model"] == "ONE Point"
+    assert device_meta["type"] == "Keys"
+    assert device_meta["type_id"] == 3
+    assert device_meta["image_url"] == "https://x/p.png"
+    assert device_meta["registered_at"] == 1700000000
+    assert device_meta["shared_with"] == "family@example.com"  # excludes your own account
+
+
+def test_settings_page_load_does_not_create_a_config_entry_for_an_unsaved_device(client, monkeypatch):
+    """The device_meta sync must follow the same rule google_name's own
+    sync already does - a device that's never been saved must not get a
+    config entry created just from viewing the settings page."""
+    from webui.forwarders import config_store, settings_service
+
+    # DATA_DIR is shared for the whole test session (see conftest.py) - the
+    # test above this one saves FAKE_CANONIC_ID, so it has to be reset here
+    # to actually exercise the never-saved-at-all path.
+    config_store.save({"devices": {}})
+
+    monkeypatch.setattr(settings_service, "get_device_details", lambda device_list: [{
+        "name": FAKE_DEVICE_NAME, "canonic_id": FAKE_CANONIC_ID, "last_seen": None,
+        "is_phone": False, "image_url": None, "device_type": None, "type_id": None, "manufacturer": "Chipolo",
+        "model": None, "carrier": None, "codename": None, "imei": None, "registered_at": None, "access": [],
+    }])
+
+    resp = client.get("/settings")
+    assert resp.status_code == 200
+    assert config_store.get_device_config(FAKE_CANONIC_ID) is None
+
+
+def test_clearing_the_device_alias_actually_saves_it_as_blank(client):
+    """A blank "display_name" post used to be rejected outright: FastAPI
+    treats an empty string posted to a required Form(...) field as if the
+    field were missing, so the save 422'd before update_device_settings's
+    body ever ran, and htmx (which doesn't swap on an error response) left
+    the page showing no error at all - the alias just silently never
+    cleared. Form("") fixes that; this locks in that a blank alias is a
+    real, persistable state, not just the freshly-loaded-page default
+    already covered above."""
+    _post_form(
+        client,
+        f"/settings/devices/{FAKE_CANONIC_ID}",
+        display_name="Garage Tracker",
+        ep_order=["0"],
+        **{"ep-0-endpoint_type": "traccar", "ep-0-url": "http://x/", "ep-0-cron": "*/5 * * * *"},
+    )
+
+    resp = _post_form(
+        client,
+        f"/settings/devices/{FAKE_CANONIC_ID}",
+        display_name="",
+        ep_order=["0"],
+        **{"ep-0-endpoint_type": "traccar", "ep-0-url": "http://x/", "ep-0-cron": "*/5 * * * *"},
+    )
+    assert resp.status_code == 200
+    assert 'name="display_name" value=""' in resp.text
+
+    from webui.forwarders import config_store
+
+    assert config_store.get_device_config(FAKE_CANONIC_ID)["display_name"] == ""
 
 
 def test_device_alias_field_is_blank_by_default_not_prefilled_with_google_name(client):
@@ -221,6 +476,28 @@ def test_endpoint_method_headers_and_body_are_saved(client):
     assert saved["headers"] == {"Authorization": "Bearer tok"}
     assert saved["body_type"] == "json"
     assert saved["body"] == '{"lat": {{latitude}}}'
+
+
+def test_endpoint_headers_body_type_and_body_are_omitted_when_left_blank(client):
+    """None of these three is required for an endpoint to make sense (no
+    custom headers, no request body is a normal, common config) - the saved
+    YAML shouldn't carry a "headers: {}"/"body_type: none"/"body: ''" for
+    every endpoint that never used them, only the ones that actually did."""
+    resp = _post_form(
+        client,
+        f"/settings/devices/{FAKE_CANONIC_ID}",
+        display_name="My Tracker",
+        ep_order=["0"],
+        **{"ep-0-url": "http://x/", "ep-0-cron": "*/5 * * * *"},
+    )
+    assert resp.status_code == 200
+
+    from webui.forwarders import config_store
+
+    saved = config_store.get_device_config(FAKE_CANONIC_ID)["endpoints"][0]
+    assert "headers" not in saved
+    assert "body_type" not in saved
+    assert "body" not in saved
 
 
 def test_skip_if_close_toggle_and_threshold_are_saved(client):
@@ -379,6 +656,180 @@ def test_only_most_recent_can_be_turned_off(client):
     assert saved["only_most_recent"] is False
 
 
+def test_filter_by_status_defaults_off_when_not_submitted(client):
+    """Off by default, same convention as skip_if_close/skip_if_inaccurate -
+    not submitting the field at all (a brand-new endpoint) must not be saved
+    as filtering anything out, and the per-type checkboxes stay unsaved too."""
+    resp = _post_form(
+        client,
+        f"/settings/devices/{FAKE_CANONIC_ID}",
+        display_name="My Tracker",
+        ep_order=["0"],
+        **{"ep-0-endpoint_type": "traccar", "ep-0-url": "http://x/", "ep-0-cron": "*/5 * * * *"},
+    )
+    assert resp.status_code == 200
+
+    from webui.forwarders import config_store
+
+    saved = config_store.get_device_config(FAKE_CANONIC_ID)["endpoints"][0]
+    assert "filter_by_status" not in saved
+    assert "blocked_statuses" not in saved
+
+
+def test_unchecking_a_status_is_a_no_op_while_filter_by_status_is_off(client):
+    """The per-type checkboxes are hidden behind "Filter by report type" in
+    the UI, but the hidden inputs still submit - unchecking one shouldn't
+    silently start filtering unless the owner turns the master toggle on
+    too. Same convention as min_movement_m/min_update_gap_m/max_accuracy_m
+    right above this block: a toggle-gated sub-field only persists while
+    its own master is on."""
+    resp = _post_form(
+        client,
+        f"/settings/devices/{FAKE_CANONIC_ID}",
+        display_name="My Tracker",
+        ep_order=["0"],
+        **{
+            "ep-0-endpoint_type": "traccar", "ep-0-url": "http://x/", "ep-0-cron": "*/5 * * * *",
+            "ep-0-status_AGGREGATED": "0",
+        },
+    )
+    assert resp.status_code == 200
+
+    from webui.forwarders import config_store
+
+    saved = config_store.get_device_config(FAKE_CANONIC_ID)["endpoints"][0]
+    assert "blocked_statuses" not in saved
+
+
+def test_status_selection_resets_on_a_yaml_round_trip_while_filter_by_status_is_off(client):
+    """Same reasoning as test_unchecking_a_status_is_a_no_op_while_filter_by_
+    status_is_off above, exercised through the "Edit as YAML" / "Edit as
+    form" live-preview routes: since blocked_statuses is never even parsed
+    while the master toggle is off, an unchecked box doesn't survive the
+    round trip either - it comes back checked, exactly like min_movement_m
+    would come back at its default if skip_if_close were off."""
+    import html
+    import re
+
+    yaml_resp = _post_form(
+        client,
+        f"/settings/devices/{FAKE_CANONIC_ID}/yaml/preview",
+        display_name="My Tracker",
+        ep_order=["0"],
+        **{
+            "ep-0-endpoint_type": "traccar", "ep-0-url": "http://x/", "ep-0-cron": "*/5 * * * *",
+            "ep-0-status_AGGREGATED": "0",  # unchecked, master left off
+        },
+    )
+    assert yaml_resp.status_code == 200
+    yaml_text = html.unescape(re.search(r"<textarea[^>]*>(.*?)</textarea>", yaml_resp.text, re.S).group(1))
+    assert "blocked_statuses" not in yaml_text  # the uncheck never made it into the YAML...
+
+    form_resp = _post_form(client, f"/settings/devices/{FAKE_CANONIC_ID}/form/preview", yaml_text=yaml_text)
+    assert form_resp.status_code == 200
+    assert 'name="ep-0-status_AGGREGATED" value="1"' in form_resp.text  # ...so it comes back checked
+
+
+def test_enabling_filter_by_status_persists_the_unchecked_statuses(client):
+    resp = _post_form(
+        client,
+        f"/settings/devices/{FAKE_CANONIC_ID}",
+        display_name="My Tracker",
+        ep_order=["0"],
+        **{
+            "ep-0-endpoint_type": "traccar", "ep-0-url": "http://x/", "ep-0-cron": "*/5 * * * *",
+            "ep-0-filter_by_status": "1",
+            "ep-0-status_AGGREGATED": "0",
+        },
+    )
+    assert resp.status_code == 200
+
+    from webui.forwarders import config_store
+
+    saved = config_store.get_device_config(FAKE_CANONIC_ID)["endpoints"][0]
+    assert saved["filter_by_status"] is True
+    assert saved["blocked_statuses"] == ["AGGREGATED"]
+
+
+def test_skip_if_not_own_report_defaults_off_when_not_submitted(client):
+    resp = _post_form(
+        client,
+        f"/settings/devices/{FAKE_CANONIC_ID}",
+        display_name="My Tracker",
+        ep_order=["0"],
+        **{
+            "ep-0-endpoint_type": "traccar", "ep-0-url": "http://x/", "ep-0-cron": "*/5 * * * *",
+            "ep-0-skip_if_not_own_report": "0",
+        },
+    )
+    assert resp.status_code == 200
+
+    from webui.forwarders import config_store
+
+    saved = config_store.get_device_config(FAKE_CANONIC_ID)["endpoints"][0]
+    assert "skip_if_not_own_report" not in saved
+
+
+def test_skip_if_not_own_report_toggle_is_saved(client):
+    resp = _post_form(
+        client,
+        f"/settings/devices/{FAKE_CANONIC_ID}",
+        display_name="My Tracker",
+        ep_order=["0"],
+        **{
+            "ep-0-endpoint_type": "traccar", "ep-0-url": "http://x/", "ep-0-cron": "*/5 * * * *",
+            "ep-0-skip_if_not_own_report": "1",
+        },
+    )
+    assert resp.status_code == 200
+    assert "checked" in resp.text
+
+    from webui.forwarders import config_store
+
+    saved = config_store.get_device_config(FAKE_CANONIC_ID)["endpoints"][0]
+    assert saved["skip_if_not_own_report"] is True
+
+
+def test_skip_if_inaccurate_toggle_and_threshold_are_saved(client):
+    resp = _post_form(
+        client,
+        f"/settings/devices/{FAKE_CANONIC_ID}",
+        display_name="My Tracker",
+        ep_order=["0"],
+        **{
+            "ep-0-endpoint_type": "traccar", "ep-0-url": "http://x/", "ep-0-cron": "*/5 * * * *",
+            "ep-0-skip_if_inaccurate": "1", "ep-0-max_accuracy_m": "150",
+        },
+    )
+    assert resp.status_code == 200
+    assert "checked" in resp.text
+
+    from webui.forwarders import config_store
+
+    saved = config_store.get_device_config(FAKE_CANONIC_ID)["endpoints"][0]
+    assert saved["skip_if_inaccurate"] is True
+    assert saved["max_accuracy_m"] == 150.0
+
+
+def test_skip_if_inaccurate_defaults_off_when_not_submitted(client):
+    resp = _post_form(
+        client,
+        f"/settings/devices/{FAKE_CANONIC_ID}",
+        display_name="My Tracker",
+        ep_order=["0"],
+        **{
+            "ep-0-endpoint_type": "traccar", "ep-0-url": "http://x/", "ep-0-cron": "*/5 * * * *",
+            "ep-0-skip_if_inaccurate": "0",
+        },
+    )
+    assert resp.status_code == 200
+
+    from webui.forwarders import config_store
+
+    saved = config_store.get_device_config(FAKE_CANONIC_ID)["endpoints"][0]
+    assert "skip_if_inaccurate" not in saved
+
+
 def test_send_now_forwards_immediately_bypassing_schedule_and_skip(client, monkeypatch):
     from webui import scheduler
     from webui.forwarders import config_store, latest_values_store
@@ -399,7 +850,7 @@ def test_send_now_forwards_immediately_bypassing_schedule_and_skip(client, monke
         return [{"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}]
 
     monkeypatch.setattr(scheduler, "locate_device", fake_locate_device)
-    monkeypatch.setattr(scheduler, "_dispatch_forward", lambda cfg, loc, name="", alias=None: "ok")
+    monkeypatch.setattr(scheduler, "_dispatch_forward", lambda cfg, loc, name="", alias=None, tracker_id="", device_meta=None, response_out=None: "ok")
 
     resp = client.post(f"/settings/devices/{FAKE_CANONIC_ID}/endpoints/0/send-now")
     assert resp.status_code == 200
@@ -435,9 +886,27 @@ def test_device_yaml_view_shows_current_config(client):
     assert resp.status_code == 200
     assert "type: custom" not in resp.text  # a preset is never saved - see presets.py
     assert "google_name" not in resp.text  # read-only, fed from Google's own device list
-    assert "display_name" not in resp.text  # that's the "Device alias" field's job, not the YAML's
+    assert "display_name: My Tracker" in resp.text  # editable here too now, same value as the alias field
     assert "url: http://x/" in resp.text
     assert "Edit as form" in resp.text
+
+
+def test_device_yaml_view_legend_always_shows_google_name_with_alias_shown_small(client):
+    """Same rule as the form view's own legend (see _device_form.html) -
+    switching to Edit as YAML must not lose that, or the two views would
+    disagree about which name identifies this device."""
+    _post_form(
+        client,
+        f"/settings/devices/{FAKE_CANONIC_ID}",
+        display_name="Garage Tracker",
+        ep_order=["0"],
+        **{"ep-0-endpoint_type": "traccar", "ep-0-url": "http://x/", "ep-0-cron": "*/5 * * * *"},
+    )
+
+    resp = client.get(f"/settings/devices/{FAKE_CANONIC_ID}/yaml")
+    assert resp.status_code == 200
+    assert f"<legend>{FAKE_DEVICE_NAME}" in resp.text
+    assert '<span class="endpoint-legend-text">(Garage Tracker)</span>' in resp.text
 
 
 def test_device_form_route_switches_back_from_yaml_view(client):
@@ -453,6 +922,11 @@ def test_edit_as_yaml_button_reflects_unsaved_form_edits_without_persisting(clie
     YAML it renders, and must not itself write anything to disk."""
     from webui.forwarders import config_store
 
+    # Seeded explicitly (rather than relying on some earlier test in the
+    # file having already synced one) so the heading assertion below isn't
+    # order-dependent - see the same google_name/alias legend rule in
+    # _device_form.html.
+    config_store.set_device_config(FAKE_CANONIC_ID, {"display_name": "", "endpoints": [], "google_name": FAKE_DEVICE_NAME})
     before = config_store.get_device_config(FAKE_CANONIC_ID)
 
     resp = _post_form(
@@ -463,9 +937,10 @@ def test_edit_as_yaml_button_reflects_unsaved_form_edits_without_persisting(clie
         **{"ep-0-url": "http://not-yet-saved.example/", "ep-0-cron": "*/5 * * * *"},
     )
     assert resp.status_code == 200
-    assert "<legend>Not Yet Saved Name" in resp.text  # the heading, not part of the YAML body itself
+    assert f"<legend>{FAKE_DEVICE_NAME}" in resp.text  # the heading - always the Google name
+    assert "(Not Yet Saved Name)" in resp.text  # the just-typed alias, shown small next to it
     assert "url: http://not-yet-saved.example/" in resp.text
-    assert "display_name" not in resp.text
+    assert "display_name: Not Yet Saved Name" in resp.text  # also carried into the YAML body itself
     assert "Edit as form" in resp.text
 
     assert config_store.get_device_config(FAKE_CANONIC_ID) == before
@@ -473,10 +948,9 @@ def test_edit_as_yaml_button_reflects_unsaved_form_edits_without_persisting(clie
 
 def test_edit_as_form_button_reflects_unsaved_yaml_edits_without_persisting(client):
     """The mirror image of the test above - the YAML view's "Edit as form"
-    button posts the textarea's current (possibly not-yet-saved) endpoints
-    text (see device_form_preview_route). The alias itself was never part
-    of the YAML in the first place (see _to_yaml_doc) - it stays whatever's
-    already saved for this device regardless of what's in the textarea."""
+    button posts the textarea's current (possibly not-yet-saved) text (see
+    device_form_preview_route), display_name included - editing the alias
+    from the YAML side must show up back in the "Device alias" field too."""
     from webui.forwarders import config_store
 
     _post_form(
@@ -488,14 +962,17 @@ def test_edit_as_form_button_reflects_unsaved_yaml_edits_without_persisting(clie
     )
     before = config_store.get_device_config(FAKE_CANONIC_ID)
 
-    yaml_text = "endpoints:\n  - url: http://not-yet-saved.example/\n    cron: '*/5 * * * *'\n"
+    yaml_text = (
+        "display_name: Edited From YAML\n"
+        "endpoints:\n  - url: http://not-yet-saved.example/\n    cron: '*/5 * * * *'\n"
+    )
     resp = client.post(f"/settings/devices/{FAKE_CANONIC_ID}/form/preview", data={"yaml_text": yaml_text})
     assert resp.status_code == 200
-    assert 'value="My Tracker"' in resp.text  # the alias, untouched by the YAML
-    assert ">http://not-yet-saved.example/</textarea>" in resp.text  # the not-yet-saved endpoint edit
+    assert 'value="Edited From YAML"' in resp.text  # the alias, picked up from the YAML edit
+    assert ">http://not-yet-saved.example/</div>" in resp.text  # the not-yet-saved endpoint edit
     assert "Edit as YAML" in resp.text
 
-    assert config_store.get_device_config(FAKE_CANONIC_ID) == before
+    assert config_store.get_device_config(FAKE_CANONIC_ID) == before  # neither edit persisted yet
 
 
 def test_edit_as_form_button_shows_invalid_yaml_error_without_switching(client):
@@ -506,8 +983,9 @@ def test_edit_as_form_button_shows_invalid_yaml_error_without_switching(client):
 
 
 def test_save_device_yaml_persists_and_reflects_in_the_form(client):
-    """The alias itself is untouched by a YAML save - see _to_yaml_doc -
-    so it should still read back as whatever was already saved for it."""
+    """A YAML save persists display_name straight from the textarea too now
+    - editing the alias from either view and saving from that same view is
+    what wins, the same as the form's own alias field always has been."""
     _post_form(
         client,
         f"/settings/devices/{FAKE_CANONIC_ID}",
@@ -517,6 +995,7 @@ def test_save_device_yaml_persists_and_reflects_in_the_form(client):
     )
 
     yaml_text = (
+        "display_name: Renamed From YAML\n"
         "endpoints:\n"
         "  - type: traccar\n"  # ignored on save, never persisted - see _from_yaml_doc
         "    method: GET\n"
@@ -530,19 +1009,66 @@ def test_save_device_yaml_persists_and_reflects_in_the_form(client):
     )
     resp = client.post(f"/settings/devices/{FAKE_CANONIC_ID}/yaml", data={"yaml_text": yaml_text})
     assert resp.status_code == 200
-    assert ">http://yaml.example</textarea>" in resp.text  # switched back to the form view
+    assert ">http://yaml.example</div>" in resp.text  # switched back to the form view
+    assert 'value="Renamed From YAML"' in resp.text
     assert "Edit as YAML" in resp.text
     assert "save-toast" in resp.text
 
     from webui.forwarders import config_store
 
     saved = config_store.get_device_config(FAKE_CANONIC_ID)
-    assert saved["display_name"] == "My Tracker"
+    assert saved["display_name"] == "Renamed From YAML"
     assert saved["endpoints"] == [{
         "method": "GET", "url": "http://yaml.example",
         "params": {}, "headers": {}, "body_type": "none", "body": "",
         "variables": {"device_id": "yaml-dev"}, "cron": "*/10 * * * *",
     }]
+
+
+def test_save_device_yaml_does_not_wipe_device_meta_when_the_device_drops_off_the_live_list(client, monkeypatch):
+    """Same reasoning as the form save's own version of this test - the
+    YAML save's _row() call re-syncs device_meta from a fresh device-list
+    fetch too, and must not lose it just because this device happens to be
+    missing from that one particular fetch."""
+    from webui.device_list_cache import device_list_cache
+    from webui.forwarders import config_store, settings_service
+
+    _sync_device_meta(client, monkeypatch, is_phone=True, carrier="T-Mobile")
+    device_list_cache.invalidate()  # or the next fetch below would just serve _sync_device_meta's cached result
+    monkeypatch.setattr(settings_service, "get_device_details", lambda device_list: [])
+
+    resp = client.post(
+        f"/settings/devices/{FAKE_CANONIC_ID}/yaml",
+        data={"yaml_text": "display_name: Renamed From YAML\nendpoints: []\n"},
+    )
+    assert resp.status_code == 200
+
+    saved = config_store.get_device_config(FAKE_CANONIC_ID)
+    assert saved["display_name"] == "Renamed From YAML"
+    assert saved["google_name"] == FAKE_DEVICE_NAME
+    assert saved["device_meta"]["carrier"] == "T-Mobile"
+
+
+def test_save_device_yaml_without_a_display_name_key_clears_the_alias(client):
+    """Omitting display_name from the YAML entirely (e.g. an older snippet,
+    or a device that never had one) is the same as an explicitly blank
+    alias - _from_yaml_doc defaults it to "", matching endpoints defaulting
+    to an empty list when that key is missing too."""
+    _post_form(
+        client,
+        f"/settings/devices/{FAKE_CANONIC_ID}",
+        display_name="My Tracker",
+        ep_order=["0"],
+        **{"ep-0-url": "http://placeholder/", "ep-0-cron": "*/5 * * * *"},
+    )
+
+    yaml_text = "endpoints:\n  - url: http://yaml.example\n    cron: '*/10 * * * *'\n"
+    resp = client.post(f"/settings/devices/{FAKE_CANONIC_ID}/yaml", data={"yaml_text": yaml_text})
+    assert resp.status_code == 200
+
+    from webui.forwarders import config_store
+
+    assert config_store.get_device_config(FAKE_CANONIC_ID)["display_name"] == ""
 
 
 def test_save_device_yaml_rejects_invalid_yaml_without_persisting(client):
@@ -651,7 +1177,7 @@ def test_invalid_cron_is_rejected_without_persisting(client):
     )
     assert bad.status_code == 200
     assert "not a valid cron expression" in bad.text
-    assert ">http://x/</textarea>" in bad.text  # typed value preserved in the error re-render
+    assert ">http://x/</div>" in bad.text  # typed value preserved in the error re-render
 
     from webui.forwarders import config_store
 
@@ -869,3 +1395,90 @@ def test_send_now_failure_shows_an_error_instead_of_crashing(client, monkeypatch
     resp = client.post(f"/settings/devices/{FAKE_CANONIC_ID}/endpoints/0/send-now")
     assert resp.status_code == 200
     assert "Send failed" in resp.text
+
+
+def test_preview_values_includes_the_last_real_fix_and_device_meta(tmp_path, monkeypatch):
+    import json
+
+    from webui import config, device_location_store
+    from webui.forwarders.settings_service import preview_values_json_for
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+    device_location_store.set_last_location(
+        FAKE_CANONIC_ID,
+        [{
+            "is_semantic": False, "latitude": 12.5, "longitude": 34.5, "accuracy": 8,
+            "status": "LAST_KNOWN", "is_own_report": False, "time": 1700000000,
+        }],
+        fetched_at=1700000000,
+    )
+    device_meta = {"manufacturer": "Chipolo", "model": "", "type": "", "image_url": "", "carrier": "T-Mobile"}
+
+    values = json.loads(preview_values_json_for(FAKE_CANONIC_ID, FAKE_DEVICE_NAME, device_meta))
+    assert values["latitude"] == 12.5
+    assert values["longitude"] == 34.5
+    assert values["accuracy_m"] == 8
+    assert values["status"] == "LAST_KNOWN"
+    assert values["own_report"] is False  # a real, known False - not omitted
+    assert values["google_timestamp"] == 1700000000
+    assert values["tracker_id"] == FAKE_CANONIC_ID
+    assert values["manufacturer"] == "Chipolo"
+    assert values["label_carrier"] == "T-Mobile"
+    assert "altitude_m" not in values  # nothing real known - left for the JS placeholder
+    assert "model" not in values
+    assert "device_name" not in values  # already handled client-side, deliberately excluded
+
+
+def test_preview_values_omits_own_report_when_no_location_is_on_file(tmp_path, monkeypatch):
+    import json
+
+    from webui import config
+    from webui.forwarders.settings_service import preview_values_json_for
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+
+    values = json.loads(preview_values_json_for(FAKE_CANONIC_ID, FAKE_DEVICE_NAME, None))
+    assert "own_report" not in values  # unlike a real False, "no fix at all" must not look like a real value
+    assert "latitude" not in values
+    assert values["tracker_id"] == FAKE_CANONIC_ID  # always real, regardless of any fix
+
+
+def test_preview_values_ignores_a_semantic_only_last_location(tmp_path, monkeypatch):
+    import json
+
+    from webui import config, device_location_store
+    from webui.forwarders.settings_service import preview_values_json_for
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+    device_location_store.set_last_location(
+        FAKE_CANONIC_ID,
+        [{"is_semantic": True, "semantic_name": "Home", "status": "SEMANTIC", "is_own_report": True, "time": 1700000000}],
+        fetched_at=1700000000,
+    )
+
+    values = json.loads(preview_values_json_for(FAKE_CANONIC_ID, FAKE_DEVICE_NAME, None))
+    assert "latitude" not in values
+    assert "status" not in values
+    assert "own_report" not in values
+
+
+def test_settings_page_embeds_this_devices_real_preview_values(client, tmp_path, monkeypatch):
+    from webui import config, device_location_store
+    from webui.forwarders import config_store
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+    device_location_store.set_last_location(
+        FAKE_CANONIC_ID,
+        [{"is_semantic": False, "latitude": 12.5, "longitude": 34.5, "time": 1700000000}],
+        fetched_at=1700000000,
+    )
+    config_store.set_device_config(FAKE_CANONIC_ID, {"display_name": "My Tracker", "endpoints": []})
+
+    resp = client.get(f"/settings/devices/{FAKE_CANONIC_ID}")
+    assert resp.status_code == 200
+    assert '<script type="application/json" class="device-preview-values">' in resp.text
+    assert '"latitude": 12.5' in resp.text

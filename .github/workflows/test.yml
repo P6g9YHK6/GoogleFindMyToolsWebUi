@@ -30,14 +30,7 @@ jobs:
       - name: Ruff
         run: ruff check .
 
-      - name: mypy (advisory)
-        # webui/ currently has ~29 real type errors (loosely-typed config
-        # dicts passed around as dict[Any, Any], mostly - see pyproject.toml's
-        # [tool.mypy]). Not blocking merges on those yet since fixing them
-        # properly means real design changes (TypedDicts for endpoint/device
-        # config), not one-line fixes - this just keeps the count visible in
-        # every run instead of silently drifting further.
-        continue-on-error: true
+      - name: mypy
         run: mypy webui
 
   test:
@@ -57,6 +50,31 @@ jobs:
 
       - name: Run tests
         run: pytest -v --cov=webui --cov-report=term-missing
+
+  lock-freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Regenerate lock file
+        run: |
+          ~/.local/bin/uv pip compile \
+            requirements.txt requirements-web.txt \
+            -o requirements.lock \
+            --python-version 3.11 \
+            --generate-hashes
+
+      - name: Check for drift
+        run: |
+          if ! git diff --exit-code requirements.lock; then
+            echo "::error::requirements.lock is out of date. Regenerate with:"
+            echo "::error::  uv pip compile requirements.txt requirements-web.txt -o requirements.lock --python-version 3.11 --generate-hashes"
+            exit 1
+          fi
 
   dependency-audit:
     runs-on: ubuntu-latest

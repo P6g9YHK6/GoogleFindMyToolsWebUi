@@ -1,13 +1,41 @@
+import asyncio
 import logging
+import os
 import pathlib
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from webui import browser_provisioning, log_capture, notify, scheduler, settings_store, ws
+from webui import (
+    auth_state,
+    browser_provisioning,
+    config,
+    demo_mode,
+    log_capture,
+    notify,
+    scheduler,
+    settings_store,
+    staleness,
+    ws,
+)
 from webui.auth_middleware import BasicAuthMiddleware
-from webui.routers import auth, devices, locate, logs, metrics, register, settings, sound, vnc_proxy
+from webui.forwarders import config_store
+from webui.routers import (
+    auth,
+    debug_export,
+    devices,
+    firmware,
+    locate,
+    logs,
+    metrics,
+    register,
+    settings,
+    sound,
+    vnc_proxy,
+)
+from webui.routers import staleness as staleness_router
 
 # Every module across the app (webui.*, Auth.*, NovaApi.*, ...) logs through
 # the standard `logging` module and propagates up to root - this is the one
@@ -26,9 +54,21 @@ BASE_DIR = pathlib.Path(__file__).parent
 async def lifespan(app: FastAPI):
     notify.configure_apprise_logging(env=settings_store.apprise_env())
     log_capture.configure_log_capture()
-    scheduler.start_all()
+    staleness_task = None
+    if not demo_mode.is_demo_mode():
+        # Nothing legitimate to poll in demo mode - every device is fake and
+        # nothing is ever actually persisted (see webui/device_store.py) -
+        # and skipping both avoids a poll/sweep loop ticking forever against
+        # fake data with nothing real to show for it.
+        scheduler.start_all()
+        # Independent of scheduler.start_all() above - see webui/staleness.py's
+        # own docstring for why a device with no forwarding endpoints (never
+        # polled by any of that module's per-device loops) still needs this.
+        staleness_task = asyncio.create_task(staleness.sweep_loop())
     yield
     scheduler.stop_all()
+    if staleness_task is not None:
+        staleness_task.cancel()
     await browser_provisioning.on_shutdown()
 
 
@@ -40,19 +80,43 @@ app.include_router(devices.router)
 app.include_router(locate.router)
 app.include_router(sound.router)
 app.include_router(register.router)
+app.include_router(firmware.router)
 app.include_router(auth.router)
+app.include_router(debug_export.router)
 app.include_router(settings.router)
 app.include_router(logs.router)
 app.include_router(metrics.router)
+app.include_router(staleness_router.router)
 app.include_router(vnc_proxy.router)
 
 
 @app.get("/health")
 async def health():
-    """Liveness probe for Docker's HEALTHCHECK (see docker/web/healthcheck.py)
-    - just confirms the app is up and answering, no real work done. Exempt
-    from BasicAuthMiddleware (see webui/auth_middleware.py) since the
+    """Readiness probe for Docker's HEALTHCHECK (see docker/web/healthcheck.py)
+    - beyond just confirming the app is up and answering, checks a handful
+    of ways it can keep answering fine while silently broken underneath:
+    a device's polling task crashed (webui/scheduler.py), forwarding.yaml
+    or auth.yaml failed to load (webui/forwarders/config_store.py,
+    Auth/token_cache.py), or the data directory stopped being writable.
+    Every check here is in-memory/stat-only - no blocking I/O, no network
+    calls - so this stays safe to poll every 30s. Exempt from
+    BasicAuthMiddleware (see webui/auth_middleware.py) since the
     container's own healthcheck can't practically carry credentials."""
+    problems = []
+    if dead := scheduler.dead_tasks():
+        problems.append(f"{len(dead)} device polling task(s) crashed")
+    if not config_store.last_load_ok():
+        problems.append("forwarding.yaml failed to load")
+    if not auth_state.auth_store_ok():
+        problems.append("auth.yaml failed to load")
+    # Moot in demo mode - nothing is ever actually written to DATA_DIR (see
+    # webui/device_store.py), so a demo deployment mounting it read-only for
+    # extra safety shouldn't be reported unhealthy over it.
+    if not demo_mode.is_demo_mode() and not os.access(config.DATA_DIR, os.W_OK):
+        problems.append(f"{config.DATA_DIR} is not writable")
+
+    if problems:
+        return JSONResponse({"status": "unhealthy", "problems": problems}, status_code=503)
     return {"status": "ok"}
 
 
@@ -75,3 +139,13 @@ async def ws_provision(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         await ws.provision_manager.disconnect(websocket)
+
+
+@app.websocket("/ws/firmware")
+async def ws_firmware(websocket: WebSocket):
+    await ws.firmware_manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await ws.firmware_manager.disconnect(websocket)

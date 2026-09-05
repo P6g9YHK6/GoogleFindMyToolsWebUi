@@ -11,10 +11,10 @@ import time
 
 from fastapi import APIRouter, Response
 
-from webui import config, system_log_store
+from webui import config, demo_mode, staleness, system_log_store
 from webui.auth_state import is_logged_in
 from webui.deps import query_gate
-from webui.forwarders import config_store, log_store
+from webui.forwarders import config_store, latest_values_store, log_store
 
 router = APIRouter()
 
@@ -39,6 +39,11 @@ def _render() -> str:
         "# HELP gfmt_logged_in Whether a Google account is currently signed in (1) or not (0).",
         "# TYPE gfmt_logged_in gauge",
         f"gfmt_logged_in {1 if is_logged_in() else 0}",
+        "",
+        "# HELP gfmt_demo_mode Whether this instance is running in demo mode (1) or not (0) - "
+        "see DEMO_MODE. Every other gauge above/below reflects the fixed demo dataset when this is 1.",
+        "# TYPE gfmt_demo_mode gauge",
+        f"gfmt_demo_mode {1 if demo_mode.is_demo_mode() else 0}",
         "",
         "# HELP gfmt_query_gate_waiting Requests currently queued behind the account-wide throttle.",
         "# TYPE gfmt_query_gate_waiting gauge",
@@ -87,6 +92,25 @@ def _render() -> str:
     for level, count in system_counts.items():
         lines.append(f'gfmt_system_log_entries{{level="{level}"}} {count}')
     lines.append("")
+
+    # Same compute_status() every device row on the Staleness page itself
+    # calls (see webui/routers/staleness.py) - can't disagree with what
+    # that page shows. Only devices with tracking actually turned on are
+    # counted at all; "stale" here always implies "enabled".
+    stale_count = 0
+    for canonic_id in config_store.all_devices():
+        staleness_cfg = latest_values_store.get_device_staleness(canonic_id)
+        if not staleness_cfg.get("enabled"):
+            continue
+        if staleness.compute_status(canonic_id, staleness_cfg)["is_stale"]:
+            stale_count += 1
+
+    lines += [
+        "# HELP gfmt_stale_devices_total Devices currently past their configured staleness threshold.",
+        "# TYPE gfmt_stale_devices_total gauge",
+        f"gfmt_stale_devices_total {stale_count}",
+        "",
+    ]
 
     return "\n".join(lines)
 

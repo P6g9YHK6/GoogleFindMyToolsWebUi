@@ -40,11 +40,20 @@ PRESETS: dict[str, dict] = {
     },
     "phonetrack": {
         "label": "Nextcloud PhoneTrack",
-        "hint": "Nextcloud PhoneTrack's log endpoint: the device name is part of the URL, the fix is sent as query params.",
+        "hint": (
+            "Nextcloud PhoneTrack's log endpoint: the device name is part of the URL, the fix is sent as query params. "
+            "useragent is PhoneTrack's own per-point field (LogController.php's logGet(), unrelated to the HTTP "
+            "User-Agent header) - its default is the literal string \"unknown GET logger\" when left out, so it's "
+            "filled in here instead. It's a plain string field; PhoneTrack's other log endpoints (OsmAnd, GpsLogger, "
+            "...) don't read a useragent param at all, so this is only ever added here. sat is PhoneTrack's "
+            "satellite-count field, repurposed here to carry Google's numeric status_id (1=LAST_KNOWN, "
+            "2=CROWDSOURCED, 3=AGGREGATED) since PhoneTrack has no dedicated status field of its own."
+        ),
         "method": "GET",
         "url": (
             "https://nc.local/apps/phonetrack/logGet/<token>/{{device_alias}}"
             "?lat={{latitude}}&lon={{longitude}}&timestamp={{google_timestamp}}&alt={{altitude_m}}&acc={{accuracy_m}}"
+            "&useragent=gfmtForwarding{{type}}&sat={{status_id}}"
         ),
         "headers": {},
         "body_type": "none",
@@ -147,24 +156,85 @@ PRESETS: dict[str, dict] = {
 DEFAULT_PRESET_KEY = "custom"
 
 # (variable name, human description) - shown as clickable chips in the
-# Variables panel, and substituted from the location/device context at send
-# time (see custom.build_context). Keep names explicit/unambiguous: e.g.
+# Variables panel, split into two groups there (see webui/routers/
+# settings.py's _TEMPLATE_CONTEXT and settings/_endpoint_fields.html) so
+# it's clear at a glance which ones come straight from Google's own fix/
+# account data versus which are generated or configured locally by this
+# app. Substituted from the location/device context at send time either
+# way (see custom.build_context). Keep names explicit/unambiguous: e.g.
 # "tracker_id" (this app's own internal id) is deliberately not called
 # "device_id", to stay unambiguous next to a service's own per-device id
 # (like Traccar's, which today is baked into the URL as a literal
 # placeholder - see the "traccar" preset above).
-BUILTIN_VARIABLES: list[tuple[str, str]] = [
+BUILTIN_VARIABLES_FROM_FIX: list[tuple[str, str]] = [
     ("latitude", "Latitude of the fix, decimal degrees"),
     ("longitude", "Longitude of the fix, decimal degrees"),
     ("altitude_m", "Altitude in meters, if Google reported one"),
     ("accuracy_m", "Google's radius of uncertainty for the fix, in meters"),
+    ("status", "Google's fix-quality flag: LAST_KNOWN, CROWDSOURCED, or AGGREGATED (coarse/low-accuracy)"),
+    ("status_id", "Same flag as status, as Google's raw numeric id: 1=LAST_KNOWN, 2=CROWDSOURCED, 3=AGGREGATED"),
+    ("is_semantic", "True if this is a named-location reading rather than a GPS fix (Google's SEMANTIC status) - a plain boolean alternative to checking status/status_id"),
+    ("semantic_name", "The named place Google reported when is_semantic is true, e.g. \"Nest Mini - Living Room\" (blank otherwise)"),
+    ("own_report", "True if this fix came from the tracker's own GPS rather than a nearby device's crowdsourced report"),
     ("google_timestamp", "Unix timestamp (seconds) of when Google recorded this fix - not when it was sent"),
-    ("current_timestamp", "Unix timestamp (seconds) right now, at send time - not when Google recorded the fix"),
     ("device_name", "This tracker's real name from your Google account (fixed, not editable here)"),
-    ("device_alias", "This tracker's local nickname, set on the Settings page (falls back to device_name until you set one)"),
+    ("manufacturer", "This device's manufacturer, from Google's own response (e.g. \"Chipolo\")"),
+    ("model", "This device's model, from Google's own response (e.g. \"ONE Point\")"),
+    ("type", "This device's category from Google's own response - Phone, Beacon, Keys, Wallet, etc."),
+    ("image_url", "URL of Google's own product photo for this device"),
+]
+
+BUILTIN_VARIABLES_FROM_APP: list[tuple[str, str]] = [
+    ("current_timestamp", "Unix timestamp (seconds) right now, at send time - not when Google recorded the fix"),
+    ("device_alias", "This tracker's local nickname, set on the Settings page (blank if none is set)"),
     ("endpoint_alias", "This endpoint's own alias, as set above"),
     ("tracker_id", "This app's own internal id for the tracker (not a target service's device id)"),
 ]
+
+# Flat combined list - still exported for anything that just needs every
+# variable name/description without caring which group it's in (e.g.
+# custom.build_context's docstring points here as the canonical list).
+BUILTIN_VARIABLES: list[tuple[str, str]] = BUILTIN_VARIABLES_FROM_FIX + BUILTIN_VARIABLES_FROM_APP
+
+# Mirrors custom.py's own private _NAMED_DEVICE_META_KEYS - duplicated
+# rather than imported since that one's private to the send-time renderer;
+# both need to draw the same "these four are always named, everything else
+# becomes label_<key>" line.
+NAMED_DEVICE_META_KEYS = ("manufacturer", "model", "type", "image_url")
+
+# Hand-written descriptions for the phone-only device_meta fields, reused by
+# device_label_variables() below so a chip's tooltip stays in sync with what
+# build_context actually flattens it to. Used to live as unconditional
+# label_* entries in BUILTIN_VARIABLES_FROM_FIX above - moved here since
+# whether one's actually offered as a chip now depends on this device's own
+# last-synced data (a non-phone tracker has none of these).
+_LABEL_DESCRIPTIONS: dict[str, str] = {
+    "carrier": "Phone-only: mobile carrier name, if Google reported one",
+    "codename": "Phone-only: the manufacturer's internal codename for the device",
+    "imei": "Phone-only: the device's IMEI - a real hardware identifier, handle with care",
+    "registered_at": "Unix timestamp (seconds) of when this device was registered to the account",
+    "shared_with": "Comma-separated emails of anyone else with access to this device (blank if just you)",
+}
+
+
+def device_label_variables(device_meta: dict | None) -> list[tuple[str, str]]:
+    """{{label_<key>}} chips actually available for THIS device, based on
+    its last-synced device_meta (see webui/routers/settings.py's
+    _device_meta_from_detail) - unlike the four NAMED_DEVICE_META_KEYS
+    fields above (always shown, even blank), a label_<key> chip is only
+    offered when this device actually has a truthy value for it, so a
+    non-phone tracker doesn't get five chips that would only ever resolve
+    to an empty string. Falls back to a generic description for a
+    device_meta key added later that hasn't been given a hand-written one
+    in _LABEL_DESCRIPTIONS yet - same spirit as custom.py build_context's
+    own "a field added later needs no matching change" comment for the
+    same field."""
+    meta = device_meta or {}
+    return [
+        (f"label_{key}", _LABEL_DESCRIPTIONS.get(key, f"This device's {key.replace('_', ' ')}, from Google's own response"))
+        for key, value in meta.items()
+        if key not in NAMED_DEVICE_META_KEYS and value
+    ]
 
 
 def blank_endpoint(cron: str) -> dict:

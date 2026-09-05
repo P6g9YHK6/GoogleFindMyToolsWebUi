@@ -11,10 +11,52 @@
   --danger: #dc2626;
   --success: #16a34a;
   --warning: #b45309;
+  --purple: #7c3aed;
   --radius: 10px;
   --radius-sm: 6px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.08);
   --shadow-md: 0 4px 10px rgba(16, 24, 40, 0.08), 0 2px 4px rgba(16, 24, 40, 0.06);
+  --shadow-lg: 0 12px 28px rgba(16, 24, 40, 0.16), 0 4px 8px rgba(16, 24, 40, 0.08);
+
+  /* 4px-based rem steps, following the values already scattered through
+     this file (0.3/0.4/0.5/0.6/0.75/0.85rem etc.) rather than a generic
+     8px scale that wouldn't match anything already here. Not adopted into
+     existing rules yet - introduced here so later passes can switch to
+     them one rule at a time instead of hand-picking a new value each time. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 2rem;
+  --space-8: 3rem;
+
+  /* Matches sizes already in use below (body 0.92rem-ish inputs, h2
+     1.2rem, h1 1.65rem) so switching a rule onto these later is a
+     non-visual swap, plus one new step (2xl) reserved for a stronger
+     page-title treatment. */
+  --font-size-xs: 0.78rem;
+  --font-size-sm: 0.85rem;
+  --font-size-base: 0.92rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.2rem;
+  --font-size-xl: 1.65rem;
+  --font-size-2xl: 1.85rem;
+
+  /* Named percentages for the color-mix() tints repeated throughout this
+     file, so the same "how strong is this tint" decision reads as one
+     name instead of a bare number at every call site. Only covers the
+     percentages that actually repeat across unrelated components - one-off
+     percentages stay as literals rather than being force-fit into a name
+     that wouldn't mean anything at the next call site. */
+  --tint-weak: 10%;
+  --tint-medium: 16%;
+  --tint-strong: 30%;
+  --tint-border: 35%;
+  --tint-focus: 22%;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -31,8 +73,10 @@
     --danger: #f87171;
     --success: #4ade80;
     --warning: #fbbf24;
+    --purple: #a78bfa;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 10px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 16px 32px rgba(0, 0, 0, 0.45), 0 4px 10px rgba(0, 0, 0, 0.35);
   }
 }
 
@@ -83,12 +127,13 @@ h1, h2, h3 {
 }
 
 h1 {
-  font-size: 1.65rem;
+  font-size: var(--font-size-2xl);
+  font-weight: 700;
   margin: 1.75rem 0 1rem;
 }
 
 h2 {
-  font-size: 1.2rem;
+  font-size: var(--font-size-lg);
   margin: 2rem 0 0.75rem;
 }
 
@@ -153,6 +198,11 @@ nav a:hover {
   text-decoration: none;
 }
 
+nav a.active {
+  color: var(--text);
+  background: var(--surface-alt);
+}
+
 nav a.brand {
   display: flex;
   align-items: center;
@@ -192,7 +242,7 @@ footer a:hover {
 /* Buttons */
 button, input[type="submit"] {
   font-family: inherit;
-  font-size: 0.9rem;
+  font-size: var(--font-size-base);
   font-weight: 500;
   color: var(--primary-contrast);
   background: var(--primary);
@@ -219,19 +269,33 @@ button:disabled {
   box-shadow: none;
 }
 
-#clear-btn {
+.btn-outline-danger {
   background: var(--surface);
   color: var(--danger);
   border-color: var(--border);
 }
 
-#clear-btn:hover:not(:disabled) {
+.btn-outline-danger:hover:not(:disabled) {
   background: var(--surface-alt);
 }
 
 /* Forms */
 form {
   margin: 0 0 1rem;
+}
+
+/* Same card look as fieldset below, for a plain <form> that isn't itself
+   wrapped in one (the firmware page's Register Tracker and build forms) -
+   share the values instead of a fieldset with an invisible legend, since
+   neither form actually groups multiple named field-sets, just one flow of
+   fields followed by a submit button. */
+.form-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.25rem 1.25rem;
+  margin-bottom: 1.5rem;
+  box-shadow: var(--shadow);
 }
 
 fieldset {
@@ -257,6 +321,16 @@ fieldset fieldset {
   margin-bottom: 1rem;
 }
 
+/* Same nested-card flattening as fieldset fieldset above - the firmware
+   page's "Customize identity"/"Advanced" <details> sit inside a .form-card,
+   and without this they'd double up two identical card outlines instead of
+   reading as one card with a lighter sub-section inside it. */
+.form-card details {
+  background: var(--surface-alt);
+  box-shadow: none;
+  margin-top: 1rem;
+}
+
 legend {
   font-weight: 600;
   padding: 0 0.4rem;
@@ -280,7 +354,7 @@ input[type="email"],
 select,
 textarea {
   font-family: inherit;
-  font-size: 0.92rem;
+  font-size: var(--font-size-base);
   font-weight: 400;
   color: var(--text);
   background: var(--surface);
@@ -308,7 +382,7 @@ select {
 input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) var(--tint-focus), transparent);
 }
 
 .yaml-editor {
@@ -335,7 +409,7 @@ th, td {
 }
 
 th {
-  font-size: 0.78rem;
+  font-size: var(--font-size-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
@@ -393,6 +467,98 @@ body.col-resizing, body.col-resizing * {
   user-select: none;
 }
 
+/* Drag-to-reorder columns (static/tables.js's addDragHandle/moveColumn) -
+   its own handle on the left of each th, separate from the resize handle
+   on the right, so a reorder drag and a resize drag can never be started
+   by the same gesture. */
+.col-drag-handle {
+  display: inline-block;
+  margin-right: 0.3rem;
+  cursor: grab;
+  color: var(--text-muted);
+  touch-action: none;
+}
+
+.col-drag-handle::before {
+  content: "⠿";
+}
+
+.col-dragging {
+  opacity: 0.5;
+}
+
+body.col-reordering, body.col-reordering * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+/* "Columns" show/hide menu (devices/_table.html, logs/_table.html) - a
+   native <details>/<summary> disclosure, same pattern as .device-details,
+   so open/close state and outside-click dismissal come for free instead
+   of being hand-rolled. */
+.table-toolbar {
+  margin-bottom: 0.6rem;
+}
+
+.columns-menu {
+  position: relative;
+  display: inline-block;
+}
+
+.columns-menu summary {
+  list-style: none;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+
+.columns-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.columns-menu summary:hover {
+  background: var(--surface-alt);
+}
+
+.columns-menu[open] summary {
+  border-color: var(--primary);
+}
+
+.columns-menu menu {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 0.3rem);
+  left: 0;
+  min-width: 12rem;
+  margin: 0;
+  padding: 0.4rem;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+}
+
+.columns-menu li {
+  padding: 0.15rem 0;
+}
+
+.columns-menu label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 400;
+  cursor: pointer;
+}
+
 tbody tr:last-child td {
   border-bottom: none;
 }
@@ -413,8 +579,8 @@ td button {
 #map {
   height: 400px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
 }
 
@@ -502,10 +668,14 @@ details ul {
 }
 
 /* Provisioning panel */
+/* Hero panels (this one, #firmware-build-panel, #device-console-panel) use
+   the larger radius - a bit more visual weight than an ordinary card/
+   fieldset, since each is the one thing actively happening on its page
+   while visible (a sign-in in progress, a build running, a live console). */
 #provision-panel {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   padding: 1rem 1.25rem;
   margin: 1.25rem 0;
   box-shadow: var(--shadow);
@@ -513,7 +683,7 @@ details ul {
 
 #provision-bar-track {
   background: var(--surface-alt);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   height: 8px;
   overflow: hidden;
   margin: 0.75rem 0 0.5rem;
@@ -523,7 +693,7 @@ details ul {
   background: var(--primary);
   height: 100%;
   width: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   transition: width 0.3s ease;
 }
 
@@ -556,15 +726,50 @@ details ul {
 
 /* Forwarding settings: endpoints - also reused by the Apprise URL list and
    both YAML editors (see webui/templates/auth/_app_settings*.html and
-   settings/_device_yaml.html), which is why this is a <textarea> everywhere
-   it's used, not an <input>. overflow-wrap only kicks in where wrapping is
-   allowed in the first place, so it's a no-op on .yaml-editor's own
-   `white-space: pre` (intentional there - YAML is indentation-sensitive)
-   and only actually wraps a long unbroken URL/token instead of overflowing. */
+   settings/_device_yaml.html), which is why every one of those stays a
+   plain <textarea>. The endpoint editor's own URL field is the one
+   exception - it's a contenteditable <div> instead (see the comment in
+   _endpoint_fields.html for why), so it needs its own look and :focus ring
+   repeated here rather than picked up for free from the site-wide
+   input/select/textarea rule above, which only targets those tags.
+   overflow-wrap only kicks in where wrapping is allowed in the first
+   place, so it's a no-op on .yaml-editor's own `white-space: pre`
+   (intentional there - YAML is indentation-sensitive) and only actually
+   wraps a long unbroken URL/token instead of overflowing. */
 .url-input {
+  display: block;
   width: 100%;
   overflow-wrap: anywhere;
   resize: vertical;
+  font-family: inherit;
+  font-size: 0.92rem;
+  font-weight: 400;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.65rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.url-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) var(--tint-focus), transparent);
+}
+
+/* Only the endpoint URL field is contenteditable (the Apprise/YAML reuses
+   above stay real textareas, which already get this from the site-wide
+   rule) - pinned to the same monospace stack the YAML editor uses, not
+   the page's regular proportional font, and white-space/cursor set
+   explicitly since a div doesn't default to either the way a textarea
+   does. */
+.url-input[contenteditable] {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  cursor: text;
 }
 
 /* The endpoint editor's own URL field (not the Apprise/YAML reuses above,
@@ -578,65 +783,6 @@ details ul {
   resize: none;
   overflow: hidden;
   min-height: 2.3rem;
-}
-
-/* URL field token highlighting - a same-size, same-font backdrop sitting
-   behind the real (transparent-background) textarea, showing through as a
-   tinted rounded box under each {{var}} token. Its own text is fully
-   transparent (only the tint shows) so it never has to render pixel-
-   perfect glyphs, just line up the same wrapping as the real textarea on
-   top of it - which is why every box-model property below (border,
-   padding, font) is copied from .url-input/textarea rather than derived.
-
-   Both this and .url-highlight .url-input below are pinned to the same
-   monospace stack the YAML editor already uses (see .yaml-editor), not the
-   page's regular proportional font - a *textarea* and a *div* are
-   different kinds of rendered elements, and proportional fonts are shaped
-   with enough browser-level hinting/kerning variance between the two that
-   even matching font-family/size/weight exactly still isn't reliably
-   pixel-identical (this is why every "highlighted textarea" implementation
-   uses a monospace font - fixed-width glyphs sidestep that whole class of
-   drift instead of chasing it property by property). */
-.url-highlight {
-  position: relative;
-}
-
-.url-highlight-backdrop {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  padding: 0.5rem 0.65rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.85rem;
-  font-weight: 400;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  color: transparent;
-  background: var(--surface);
-  pointer-events: none;
-}
-
-.url-highlight-backdrop .tok-resolved,
-.url-highlight-backdrop .tok-unresolved {
-  border-radius: 3px;
-  color: transparent;
-}
-
-.url-highlight-backdrop .tok-resolved {
-  background: color-mix(in srgb, var(--success) 30%, transparent);
-}
-
-.url-highlight-backdrop .tok-unresolved {
-  background: color-mix(in srgb, var(--warning) 30%, transparent);
-}
-
-.url-highlight .url-input {
-  position: relative;
-  background: transparent;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.85rem;
 }
 
 .endpoints-container {
@@ -669,7 +815,7 @@ details ul {
   letter-spacing: 0.04em;
   color: var(--primary);
   background: color-mix(in srgb, var(--primary) 14%, transparent);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0.15rem 0.55rem;
 }
 
@@ -741,6 +887,17 @@ details ul {
 .checkbox-label input[type="checkbox"] {
   width: 1rem;
   height: 1rem;
+}
+
+.checkbox-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.checkbox-stack label {
+  margin: 0;
 }
 
 /* Cron */
@@ -889,7 +1046,7 @@ details ul {
   color: var(--text-muted);
   border: none;
   box-shadow: none;
-  padding: 0.5rem 0.6rem; /* the ✕ glyph itself stays small (font-size below); this just widens the tap target */
+  padding: 0.5rem 0.6rem; /* the x icon itself stays small (font-size below); this just widens the tap target */
   font-size: 0.85rem;
   line-height: 1;
   min-width: 2.1rem;
@@ -899,6 +1056,132 @@ details ul {
 .btn-remove-row:hover:not(:disabled) {
   color: var(--danger);
   background: transparent;
+  box-shadow: none;
+}
+
+/* Devices page "Device" column - category/photo from Google's own device-
+   list response, plus a <details> toggle for the rest (manufacturer,
+   model, carrier, IMEI, sharing info - see devices/_table.html for why
+   those stay behind a click rather than in the always-visible row). */
+.device-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.device-thumb {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: var(--surface-alt);
+}
+
+/* Wraps .device-thumb so it's a real, keyboard-operable control (see
+   static/app.js's click handler and #device-image-modal in
+   devices/list.html) - reset to plain button chrome so it doesn't look
+   like a button, just a clickable photo. */
+.device-thumb-btn {
+  display: inline-flex;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+}
+
+.device-thumb-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Full-size device photo popup - a native <dialog>, so the centered
+   layout, the dimmed backdrop below, and Escape-to-close all come for
+   free instead of being hand-rolled. */
+.image-modal {
+  position: relative;
+  max-width: min(90vw, 640px);
+  max-height: 90vh;
+  padding: 1rem;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.image-modal::backdrop {
+  background: color-mix(in srgb, black 55%, transparent);
+}
+
+.image-modal-img {
+  display: block;
+  max-width: 100%;
+  max-height: 75vh;
+  margin: 0 auto;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+}
+
+.image-modal-caption {
+  margin: 0.6rem 0 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.image-modal-close {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+}
+
+.device-details {
+  margin-top: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.device-details summary {
+  cursor: pointer;
+  color: var(--primary);
+}
+
+.device-details ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+}
+
+/* Devices page "Actions" column - Locate/Play sound/Stop sound (see
+   devices/_table.html). Wraps onto more than one line (buttons stacking
+   above each other) instead of forcing the column wider or spilling into a
+   horizontal scroll once the cell is narrower than all three buttons side
+   by side (a resized/reordered column, a narrow viewport, ...). */
+.actions-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.btn-icon {
+  /* Background at 80% opacity, but the border stays fully opaque - a
+     color-mix on the border too would fade it out along with the fill and
+     leave the button's edge looking washed out against the table row. */
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.95rem;
+  line-height: 1;
+  min-width: 2.1rem;
+  min-height: 2.1rem;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: var(--surface-alt);
   box-shadow: none;
 }
 
@@ -956,9 +1239,9 @@ details ul {
   font-size: 0.76rem;
   font-weight: 500;
   color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 10%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
-  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) var(--tint-weak), var(--surface));
+  border: 1px solid color-mix(in srgb, var(--primary) var(--tint-strong), var(--border));
+  border-radius: var(--radius-pill);
   padding: 0.28rem 0.65rem;
   box-shadow: none;
   min-height: 2.1rem; /* the label itself stays compact; this just widens the tap target */
@@ -988,6 +1271,45 @@ details ul {
   color: var(--text-muted);
 }
 
+/* Device console */
+#device-console-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.25rem;
+  margin: 1.25rem 0;
+  box-shadow: var(--shadow);
+}
+
+/* firmware-build-panel had no styling of its own before - just plain
+   content - left that way while it was a rare page; sits alongside
+   #device-console-panel and #provision-panel above now, so it gets the
+   same hero-panel treatment instead of looking bare next to them. */
+#firmware-build-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.25rem;
+  margin: 1.25rem 0;
+  box-shadow: var(--shadow);
+}
+
+#device-console-controls {
+  margin: 0.5rem 0;
+}
+
+#device-console-note {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin: 0.5rem 0;
+}
+
+#device-console-log {
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0.5rem 0 0;
+}
+
 .method-badge {
   display: inline-block;
   font-weight: 700;
@@ -998,18 +1320,26 @@ details ul {
   margin-right: 0.4rem;
 }
 
-.method-badge.get { color: var(--primary); background: color-mix(in srgb, var(--primary) 16%, transparent); }
-.method-badge.post { color: var(--success); background: color-mix(in srgb, var(--success) 16%, transparent); }
-.method-badge.put, .method-badge.patch { color: var(--warning); background: color-mix(in srgb, var(--warning) 16%, transparent); }
-.method-badge.delete { color: var(--danger); background: color-mix(in srgb, var(--danger) 16%, transparent); }
+.method-badge.get { color: var(--primary); background: color-mix(in srgb, var(--primary) var(--tint-medium), transparent); }
+.method-badge.post { color: var(--success); background: color-mix(in srgb, var(--success) var(--tint-medium), transparent); }
+.method-badge.put, .method-badge.patch { color: var(--warning); background: color-mix(in srgb, var(--warning) var(--tint-medium), transparent); }
+.method-badge.delete { color: var(--danger); background: color-mix(in srgb, var(--danger) var(--tint-medium), transparent); }
 
 .tok-resolved { color: var(--success); }
 .tok-unresolved {
   color: var(--warning);
-  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  background: color-mix(in srgb, var(--warning) var(--tint-medium), transparent);
   border-radius: 3px;
   padding: 0 2px;
 }
+
+/* URL scheme/host coloring - only used in the endpoint URL field
+   (endpoint_fields.js's renderUrlTemplate()), not the request preview
+   below, so the protocol and fqdn are readable at a glance while typing.
+   Not a correct/wrong state like the two above, so no background pill,
+   just a distinct, calmer text color. */
+.tok-scheme { color: var(--primary); }
+.tok-host { color: var(--purple); }
 
 /* Toggle + the field(s) it gates - hidden entirely, not just greyed out,
    when the checkbox is off, with a left rule tying them to their toggle. */
@@ -1065,58 +1395,159 @@ details ul {
   to { opacity: 0; }
 }
 
+/* Devices page "Actions" column feedback (see devices/_table.html and
+   devices/_sound_status.html) - a spinner while Locate/Play sound/Stop
+   sound is in flight, then a pass/fail glyph in its place. */
+.action-spinner {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.9rem;
+  margin-left: 0.3rem;
+  vertical-align: middle;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: action-spin 0.7s linear infinite;
+}
+
+@keyframes action-spin {
+  to { transform: rotate(360deg); }
+}
+
+.action-status {
+  display: inline-block;
+  margin-left: 0.3rem;
+  font-weight: 500;
+  vertical-align: middle;
+}
+
+.action-status--ok {
+  color: var(--success);
+  animation: save-toast-fade 2.4s ease forwards;
+  animation-delay: 1s;
+}
+
+.action-status--error {
+  color: var(--danger);
+}
+
+/* One .device-row per device on the Forwarding Settings page, each already
+   a bordered fieldset - without this, several devices (each with several
+   endpoint fieldsets of their own) run together into one long column of
+   near-identical boxes with nothing marking where one device ends and the
+   next begins. */
+.device-row + .device-row {
+  margin-top: 2rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--border);
+}
+
 .unsaved-banner {
   font-size: 0.8rem;
   font-weight: 500;
   color: var(--warning);
   background: color-mix(in srgb, var(--warning) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--warning) var(--tint-border), var(--border));
   border-radius: var(--radius-sm);
   padding: 0.4rem 0.75rem;
   margin: 0 0 0.75rem;
 }
 
-.unsaved-banner::before {
-  content: "● ";
+.status-dot {
+  display: inline-block;
+  width: 0.5em;
+  height: 0.5em;
+  margin-right: 0.4em;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .save-toast {
+  .save-toast,
+  .action-status--ok {
     animation: none;
+  }
+
+  .action-spinner {
+    animation: none;
+    opacity: 0.6; /* still visibly "something's happening" without the spin */
   }
 }
 
 /* Forwarding log */
+/* Status/level pills - same tinted-badge language as .method-badge, so a
+   long Logs table (or the Staleness status column, which reuses these same
+   classes) scans by color at a glance instead of relying on text color
+   alone to separate an error from routine activity. */
+.log-ok, .log-error, .log-skipped, .log-critical, .log-warning, .log-info {
+  display: inline-block;
+  font-weight: 500;
+  padding: 0.15rem 0.55rem;
+  border-radius: var(--radius-pill);
+}
+
 .log-ok {
   color: var(--success);
-  font-weight: 500;
+  background: color-mix(in srgb, var(--success) var(--tint-medium), transparent);
 }
 
 .log-error {
   color: var(--danger);
-  font-weight: 500;
+  background: color-mix(in srgb, var(--danger) var(--tint-medium), transparent);
 }
 
 .log-skipped {
   color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) var(--tint-medium), transparent);
 }
 
 .log-critical {
   color: var(--danger);
   font-weight: 700;
+  background: color-mix(in srgb, var(--danger) var(--tint-medium), transparent);
 }
 
 .log-warning {
   color: var(--warning);
-  font-weight: 500;
+  background: color-mix(in srgb, var(--warning) var(--tint-medium), transparent);
 }
 
 .log-info {
   color: var(--text);
+  background: var(--surface-alt);
 }
 
 .log-debug {
   color: var(--text-muted);
+}
+
+/* Staleness page - a device with tracking off is still listed (so turning
+   it on is one click away), just visually dimmed rather than hidden. */
+.staleness-row--disabled {
+  opacity: 0.6;
+}
+
+.staleness-ago {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* Otherwise stretches edge-to-edge across whatever's left of the row once
+   the other three columns take their share - a multi-field form reads
+   better as a contained panel than a form spread the full width of a wide
+   table cell. */
+.staleness-configure {
+  max-width: 32rem;
+}
+
+.duration-field {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.duration-custom {
+  width: 6rem;
 }
 
 .log-payload {
@@ -1126,6 +1557,10 @@ details ul {
   white-space: pre-wrap;
   word-break: break-all;
   color: var(--text-muted);
+}
+
+.log-response {
+  margin-top: 0.3rem;
 }
 
 /* Log filter toolbar */

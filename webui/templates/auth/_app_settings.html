@@ -55,8 +55,79 @@
     <p class="field-hint">Instead of listing every location from the last pull, show just the one with the latest timestamp (and only that one's map pin). Google can return several readings in one response - most people only want to see the newest.</p>
   </fieldset>
 
+  <fieldset>
+    <legend>Staleness page</legend>
+    <label>How often to re-check every device's last-known fix age
+      <input type="number" name="staleness_sweep_interval_s" min="60" step="60"
+             value="{{ app_settings.staleness_sweep_interval_s }}">
+    </label>
+    <p class="field-hint">Seconds. Independent of any device's own poll schedule - see the <a href="/staleness">Staleness page</a>, where each device's own alert threshold is set.</p>
+  </fieldset>
+
+  <fieldset id="semantic-map-fieldset">
+    <legend>Semantic location mapping</legend>
+    <p class="field-hint">Google reports a tracker as being at a named place (e.g. "Nest Mini - Living Room")
+       instead of GPS coordinates when it's near one of your other Find My Network devices - with no coordinates,
+       forwarding has nothing to send. Map a semantic name here to fixed coordinates and a matching reading is
+       forwarded using them, still flagged as a semantic (not GPS) fix. With Full match the name must equal
+       exactly what Google reports, case included; Partial match only requires it to appear somewhere in what
+       Google reports, case-insensitively - check the Devices page or a Forwarding Log entry's payload for the
+       exact text.</p>
+    <div class="kv-section">
+      <div class="kv-head"><h3>Mappings</h3><button type="button" class="btn-add" id="semantic-map-add">+ Add row</button></div>
+      <table>
+        <thead><tr><th>Semantic name</th><th>Latitude</th><th>Longitude</th><th>Match type</th><th></th></tr></thead>
+        <tbody class="kv-body" data-kv="semantic-map">
+          {% for name, coords in app_settings.semantic_location_map.items() %}
+            <tr>
+              <td><input type="text" class="kv-key" name="semantic_name" value="{{ name }}" placeholder="Nest Mini - Living Room"></td>
+              <td><input type="number" step="any" name="semantic_lat" value="{{ coords.latitude }}"></td>
+              <td><input type="number" step="any" name="semantic_lon" value="{{ coords.longitude }}"></td>
+              <td>
+                <select name="semantic_match_mode">
+                  <option value="full" {% if coords.match_mode | default("full") == "full" %}selected{% endif %}>Full match</option>
+                  <option value="partial" {% if coords.match_mode == "partial" %}selected{% endif %}>Partial match</option>
+                </select>
+              </td>
+              <td class="kv-remove-cell"><button type="button" class="btn-remove-row" title="Remove row">✕</button></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </fieldset>
+  <script>
+    // Scoped entirely to this fieldset rather than a document-level
+    // delegated handler (contrast static/endpoint_fields.js's kvRow/
+    // btn-add handling) - that file's wired to per-endpoint indexed blocks
+    // and isn't loaded on this page at all. htmx re-runs this script every
+    // time this form is swapped back in (after a save, or leaving the YAML
+    // view), which re-creates these listeners from scratch on the fresh
+    // DOM each time - never duplicated, since the old fieldset (and its
+    // listeners) is discarded by the swap, not reused.
+    (function () {
+      var fieldset = document.getElementById("semantic-map-fieldset");
+      var body = fieldset.querySelector('[data-kv="semantic-map"]');
+      document.getElementById("semantic-map-add").addEventListener("click", function () {
+        var tr = document.createElement("tr");
+        tr.innerHTML =
+          '<td><input type="text" class="kv-key" name="semantic_name" placeholder="Nest Mini - Living Room"></td>' +
+          '<td><input type="number" step="any" name="semantic_lat"></td>' +
+          '<td><input type="number" step="any" name="semantic_lon"></td>' +
+          '<td><select name="semantic_match_mode"><option value="full" selected>Full match</option><option value="partial">Partial match</option></select></td>' +
+          '<td class="kv-remove-cell"><button type="button" class="btn-remove-row" title="Remove row">✕</button></td>';
+        body.appendChild(tr);
+      });
+      fieldset.addEventListener("click", function (e) {
+        if (e.target.classList.contains("btn-remove-row")) {
+          e.target.closest("tr").remove();
+        }
+      });
+    })();
+  </script>
+
   {% if saved %}
-    <p class="endpoint-status">Saved.</p>
+    <p class="endpoint-status endpoint-status--ok">✓ Saved.</p>
   {% endif %}
 
   <button type="submit">Save settings</button>

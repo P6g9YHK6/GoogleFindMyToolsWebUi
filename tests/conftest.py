@@ -40,6 +40,7 @@ os.environ.pop("GFMT_TLS_CERT_PATH", None)
 os.environ.pop("GFMT_TLS_KEY_PATH", None)
 os.environ.pop("GFMT_TLS_SAN", None)
 os.environ.pop("APPRISE_URLS", None)  # deterministic: no real notifications fired from tests
+os.environ.pop("DEMO_MODE", None)  # deterministic: demo mode off unless a test explicitly enables it
 
 import pytest  # noqa: E402
 from starlette.testclient import TestClient  # noqa: E402
@@ -55,25 +56,49 @@ def stub_backend(monkeypatch):
     """Sane defaults for every router's external-service boundary, so most
     tests get a working "happy path" for free and only override what they
     specifically care about."""
+    from webui import demo_mode
     from webui.device_list_cache import device_list_cache
-    from webui.routers import auth, devices, locate, logs, register, settings, sound
+    from webui.forwarders import settings_service
+    from webui.routers import auth, devices, firmware, locate, logs, register, settings, sound
+    from webui.routers import staleness as staleness_router
 
     # webui/device_list_cache.py's singleton is a real module-level global
     # like query_throttle above - without this, a value cached by one test
     # (well within its default 8s TTL; tests run in milliseconds) would
     # leak into the next test instead of that test's own monkeypatched
-    # get_canonic_ids/request_device_list ever actually running.
+    # get_device_details/request_device_list ever actually running.
     device_list_cache.invalidate()
 
-    def fake_get_canonic_ids(device_list):
-        return [(FAKE_DEVICE_NAME, FAKE_CANONIC_ID, FAKE_LAST_SEEN)]
+    def fake_get_device_details(device_list):
+        return [{
+            "name": FAKE_DEVICE_NAME, "canonic_id": FAKE_CANONIC_ID, "last_seen": FAKE_LAST_SEEN,
+            "is_phone": False, "image_url": None, "device_type": None, "type_id": None, "manufacturer": None,
+            "model": None, "carrier": None, "codename": None, "imei": None, "registered_at": None, "access": [],
+        }]
 
-    for mod in (devices, settings, logs):
+    for mod in (devices, firmware, settings, logs, staleness_router):
         monkeypatch.setattr(mod, "is_logged_in", lambda: True)
-    for mod in (devices, settings):
+    # webui/demo_mode.py's devices_placeholder_active() looks up the real
+    # webui.auth_state.is_logged_in() (its own bound name - see that
+    # module), not any router's stubbed one above - without this, it reads
+    # the real (unstubbed, always-False-in-tests, no real credentials ever
+    # cached here) check and treats every test as "no account configured
+    # yet", making webui/routers/devices.py's get_devices() always return
+    # the fake demo dataset instead of this fixture's own stubbed device.
+    # Demo-mode tests (tests/test_demo_mode.py) override this back to False
+    # explicitly where they need to.
+    monkeypatch.setattr(demo_mode, "is_logged_in", lambda: True)
+    # settings.py's own fetch-and-parse logic lives in settings_service.py
+    # now (see webui/forwarders/settings_service.py) - patch there instead
+    # of on the router module itself.
+    for mod in (devices, settings_service, staleness_router):
         monkeypatch.setattr(mod, "request_device_list", lambda: b"")
         monkeypatch.setattr(mod, "parse_device_list_protobuf", lambda hex: None)
-        monkeypatch.setattr(mod, "get_canonic_ids", fake_get_canonic_ids)
+        # All three pages share one device_list_cache slot (see its own
+        # docstring), so all need to fetch the same shape from it even
+        # though settings_service.py/staleness.py only actually use
+        # name/canonic_id.
+        monkeypatch.setattr(mod, "get_device_details", fake_get_device_details)
 
     monkeypatch.setattr(devices, "refresh_custom_trackers", lambda device_list: None)
     monkeypatch.setattr(auth, "is_logged_in", lambda: True)
@@ -88,8 +113,8 @@ def stub_backend(monkeypatch):
 
     monkeypatch.setattr(sound, "set_sound", fake_set_sound)
 
-    async def fake_register_tracker():
-        return {"eid_hex": "deadbeef"}
+    async def fake_register_tracker(**kwargs):
+        return {"eid_hex": "deadbeef", "pair_date": 1700000000}
 
     monkeypatch.setattr(register, "register_tracker", fake_register_tracker)
 

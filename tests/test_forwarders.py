@@ -34,6 +34,15 @@ def test_phonetrack_preset_bakes_device_alias_and_query_params_into_the_url():
     assert "lat={{latitude}}" in preset["url"]
 
 
+def test_phonetrack_preset_sets_useragent_so_it_does_not_default_to_unknown():
+    """logGet() (PhoneTrack's LogController.php) defaults its own per-point
+    useragent field to the literal "unknown GET logger" when the query
+    string leaves it out - baked in here instead. Only "phonetrack" itself
+    (not its OsmAnd/GpsLogger/etc siblings) even reads this param - see
+    this preset's own hint."""
+    assert "useragent=gfmtForwarding{{type}}" in PRESETS["phonetrack"]["url"]
+
+
 def test_phonetrack_locusmap_and_ulogger_presets_use_time_not_timestamp():
     # Unlike PhoneTrack's other GET endpoints, these two use ?time= - worth
     # pinning since it looks like a typo next to the others.
@@ -100,6 +109,75 @@ def test_forward_to_custom_renders_templated_url_and_its_query_string(monkeypatc
     # the URL itself. (Passing params= used to silently replace/wipe the
     # URL's own query string entirely, even with an empty dict.)
     assert "params" not in captured["kwargs"]
+
+
+def test_forward_to_custom_fills_response_out_when_given(monkeypatch):
+    from webui.forwarders import custom
+
+    class FakeResponse:
+        status_code = 200
+        text = '{"done":1}'
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(custom.httpx, "request", lambda method, url, **kwargs: FakeResponse())
+
+    endpoint_cfg = {"method": "GET", "url": "http://x/", "headers": {}, "body_type": "none", "body": ""}
+    location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
+
+    response_out = {}
+    assert custom.forward_to_custom(endpoint_cfg, location, "My Phone", response_out=response_out) is True
+    assert response_out == {"status_code": 200, "body": '{"done":1}'}
+
+
+def test_forward_to_custom_captures_the_response_body_before_raising_for_an_http_error(monkeypatch):
+    """A non-2xx response's body is exactly what's most useful for
+    debugging - captured before raise_for_status() turns it into the
+    caller's "error: ..." status, not lost along with the exception."""
+    import httpx
+
+    from webui.forwarders import custom
+
+    class FakeResponse:
+        status_code = 500
+        text = "Internal Server Error"
+
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError("500", request=None, response=self)
+
+    monkeypatch.setattr(custom.httpx, "request", lambda method, url, **kwargs: FakeResponse())
+
+    endpoint_cfg = {"method": "GET", "url": "http://x/", "headers": {}, "body_type": "none", "body": ""}
+    location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
+
+    response_out = {}
+    try:
+        custom.forward_to_custom(endpoint_cfg, location, "My Phone", response_out=response_out)
+    except httpx.HTTPStatusError:
+        pass
+    assert response_out == {"status_code": 500, "body": "Internal Server Error"}
+
+
+def test_forward_to_custom_truncates_a_very_long_response_body(monkeypatch):
+    from webui.forwarders import custom
+
+    class FakeResponse:
+        status_code = 200
+        text = "x" * (custom.MAX_LOGGED_RESPONSE_CHARS + 500)
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(custom.httpx, "request", lambda method, url, **kwargs: FakeResponse())
+
+    endpoint_cfg = {"method": "GET", "url": "http://x/", "headers": {}, "body_type": "none", "body": ""}
+    location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
+
+    response_out = {}
+    custom.forward_to_custom(endpoint_cfg, location, "My Phone", response_out=response_out)
+    assert response_out["body"].endswith("... (truncated)")
+    assert len(response_out["body"]) == custom.MAX_LOGGED_RESPONSE_CHARS + len("... (truncated)")
 
 
 def test_forward_to_custom_leaves_unresolved_variables_visible(monkeypatch):
@@ -210,6 +288,237 @@ def test_forward_to_custom_device_alias_falls_back_to_device_name(monkeypatch):
     assert captured["url"] == "https://nc.local/x/My Phone/My Phone"
 
 
+def test_build_context_includes_tracker_id():
+    from webui.forwarders.custom import build_context
+
+    location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
+    ctx = build_context({}, location, "My Phone", tracker_id="abc-123")
+    assert ctx["tracker_id"] == "abc-123"
+
+
+def test_build_context_tracker_id_defaults_to_blank_when_not_passed():
+    from webui.forwarders.custom import build_context
+
+    location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
+    ctx = build_context({}, location, "My Phone")
+    assert ctx["tracker_id"] == ""
+
+
+def test_forward_to_custom_substitutes_tracker_id(monkeypatch):
+    """{{tracker_id}} used to be offered as a Variables chip (see
+    presets.py's BUILTIN_VARIABLES_FROM_APP) without build_context() ever
+    actually setting it - a request built with it in the URL silently went
+    out to the literal string "{{tracker_id}}" forever, with no error or
+    log anywhere."""
+    from webui.forwarders import custom
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+    def fake_request(method, url, **kwargs):
+        captured["url"] = url
+        return FakeResponse()
+
+    monkeypatch.setattr(custom.httpx, "request", fake_request)
+
+    endpoint_cfg = {
+        "method": "GET", "url": "https://svc.example/{{tracker_id}}/update",
+        "headers": {}, "body_type": "none", "body": "",
+    }
+    location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
+    custom.forward_to_custom(endpoint_cfg, location, "My Phone", tracker_id="canonic-abc-123")
+    assert captured["url"] == "https://svc.example/canonic-abc-123/update"
+
+
+def test_build_context_flattens_named_device_meta_fields():
+    from webui.forwarders.custom import build_context
+
+    location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
+    device_meta = {"manufacturer": "Chipolo", "model": "ONE Point", "type": "Beacon", "image_url": "https://x/p.png"}
+    ctx = build_context({}, location, "My Phone", device_meta=device_meta)
+    assert ctx["manufacturer"] == "Chipolo"
+    assert ctx["model"] == "ONE Point"
+    assert ctx["type"] == "Beacon"
+    assert ctx["image_url"] == "https://x/p.png"
+
+
+def test_build_context_prefixes_unnamed_device_meta_fields_with_label():
+    """Anything in device_meta beyond the four named fields becomes
+    {{label_<key>}} generically - so a field added to get_device_details
+    later needs no matching change in build_context to become available."""
+    from webui.forwarders.custom import build_context
+
+    location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
+    device_meta = {"carrier": "Vodafone", "imei": "123456", "a_future_field": "x"}
+    ctx = build_context({}, location, "My Phone", device_meta=device_meta)
+    assert ctx["label_carrier"] == "Vodafone"
+    assert ctx["label_imei"] == "123456"
+    assert ctx["label_a_future_field"] == "x"
+
+
+def test_build_context_device_meta_fields_default_to_blank_when_not_passed():
+    from webui.forwarders.custom import build_context
+
+    location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
+    ctx = build_context({}, location, "My Phone")
+    assert ctx["manufacturer"] == ""
+    assert ctx["model"] == ""
+    assert ctx["type"] == ""
+    assert ctx["image_url"] == ""
+    assert "label_carrier" not in ctx  # nothing to derive a label_* key from
+
+
+def test_forward_to_custom_substitutes_device_meta_fields(monkeypatch):
+    from webui.forwarders import custom
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+    def fake_request(method, url, **kwargs):
+        captured["url"] = url
+        return FakeResponse()
+
+    monkeypatch.setattr(custom.httpx, "request", fake_request)
+
+    endpoint_cfg = {
+        "method": "GET", "url": "https://svc.example/?mfr={{manufacturer}}&model={{model}}&imei={{label_imei}}",
+        "headers": {}, "body_type": "none", "body": "",
+    }
+    location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
+    device_meta = {"manufacturer": "Chipolo", "model": "ONE Point", "imei": "354935091234567"}
+    custom.forward_to_custom(endpoint_cfg, location, "My Phone", device_meta=device_meta)
+    assert captured["url"] == "https://svc.example/?mfr=Chipolo&model=ONE Point&imei=354935091234567"
+
+
+def test_build_context_exposes_status_and_own_report():
+    from webui.forwarders.custom import build_context
+
+    location = {
+        "is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1,
+        "status": "AGGREGATED", "status_id": 3, "is_own_report": True,
+    }
+    ctx = build_context({}, location, "My Phone")
+    assert ctx["status"] == "AGGREGATED"
+    assert ctx["status_id"] == 3
+    assert ctx["own_report"] is True
+    assert ctx["is_semantic"] is False
+    assert ctx["semantic_name"] == ""
+
+
+def test_build_context_status_and_own_report_default_when_missing():
+    from webui.forwarders.custom import build_context
+
+    location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
+    ctx = build_context({}, location, "My Phone")
+    assert ctx["status"] == ""
+    assert ctx["status_id"] == ""
+    assert ctx["own_report"] is False
+    assert ctx["is_semantic"] is False
+    assert ctx["semantic_name"] == ""
+
+
+def test_build_context_exposes_is_semantic_and_semantic_name():
+    from webui.forwarders.custom import build_context
+
+    location = {
+        "is_semantic": True, "semantic_name": "Nest Mini - Living Room",
+        "latitude": 45.0, "longitude": 9.0, "time": 1,
+        "status": "SEMANTIC", "status_id": 0, "is_own_report": True,
+    }
+    ctx = build_context({}, location, "My Phone")
+    assert ctx["is_semantic"] is True
+    assert ctx["semantic_name"] == "Nest Mini - Living Room"
+
+
+def test_forward_to_custom_substitutes_status_and_own_report(monkeypatch):
+    from webui.forwarders import custom
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+    def fake_request(method, url, **kwargs):
+        captured["url"] = url
+        return FakeResponse()
+
+    monkeypatch.setattr(custom.httpx, "request", fake_request)
+
+    endpoint_cfg = {
+        "method": "GET",
+        "url": "https://svc.example/?status={{status}}&status_id={{status_id}}&own={{own_report}}",
+        "headers": {}, "body_type": "none", "body": "",
+    }
+    location = {
+        "is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1,
+        "status": "CROWDSOURCED", "status_id": 2, "is_own_report": False,
+    }
+    custom.forward_to_custom(endpoint_cfg, location, "My Phone")
+    assert captured["url"] == "https://svc.example/?status=CROWDSOURCED&status_id=2&own=False"
+
+
+def test_build_context_exposes_type_id_alongside_type():
+    from webui.forwarders.custom import build_context
+
+    location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
+    device_meta = {"type": "Keys", "type_id": 3}
+    ctx = build_context({}, location, "My Phone", device_meta=device_meta)
+    assert ctx["type"] == "Keys"
+    assert ctx["type_id"] == 3
+
+
+def test_build_context_type_id_defaults_to_empty_string_when_missing():
+    from webui.forwarders.custom import build_context
+
+    location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
+    ctx = build_context({}, location, "My Phone")
+    assert ctx["type_id"] == ""
+
+
+def test_build_context_type_id_zero_is_not_treated_as_missing():
+    """DEVICE_TYPE_UNKNOWN is enum value 0 - a legitimate value, not an
+    absent one (see custom.py's _NAMED_DEVICE_META_KEYS loop)."""
+    from webui.forwarders.custom import build_context
+
+    location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
+    device_meta = {"type": "Unknown", "type_id": 0}
+    ctx = build_context({}, location, "My Phone", device_meta=device_meta)
+    assert ctx["type_id"] == 0
+
+
+def test_forward_to_custom_substitutes_type_id(monkeypatch):
+    from webui.forwarders import custom
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+    def fake_request(method, url, **kwargs):
+        captured["url"] = url
+        return FakeResponse()
+
+    monkeypatch.setattr(custom.httpx, "request", fake_request)
+
+    endpoint_cfg = {
+        "method": "GET",
+        "url": "https://svc.example/?type={{type}}&type_id={{type_id}}",
+        "headers": {}, "body_type": "none", "body": "",
+    }
+    location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
+    device_meta = {"type": "Keys", "type_id": 3}
+    custom.forward_to_custom(endpoint_cfg, location, "My Phone", device_meta=device_meta)
+    assert captured["url"] == "https://svc.example/?type=Keys&type_id=3"
+
+
 def test_forward_to_custom_device_name_uses_device_display_name(monkeypatch):
     from webui.forwarders import custom
 
@@ -290,6 +599,45 @@ def test_forward_to_custom_skips_semantic_and_missing_coordinates():
     assert custom.forward_to_custom(endpoint_cfg, {"is_semantic": False, "latitude": None}, "n") is False
 
 
+def test_forward_to_custom_sends_a_semantic_reading_with_mapped_coordinates(monkeypatch):
+    """A SEMANTIC reading with coordinates filled in by
+    webui/forwarders/semantic_map.py (see webui/scheduler.py, where that
+    happens before this is ever called) sends exactly like a real fix -
+    is_semantic and status="SEMANTIC" ride along unchanged."""
+    from webui.forwarders import custom
+
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+    def fake_request(method, url, **kwargs):
+        captured["url"] = url
+        return FakeResponse()
+
+    monkeypatch.setattr(custom.httpx, "request", fake_request)
+
+    endpoint_cfg = {
+        "method": "GET",
+        "url": (
+            "https://svc.example/?lat={{latitude}}&lon={{longitude}}&status={{status}}"
+            "&is_semantic={{is_semantic}}&semantic_name={{semantic_name}}"
+        ),
+        "headers": {}, "body_type": "none", "body": "",
+    }
+    location = {
+        "is_semantic": True, "semantic_name": "Nest Mini - Living Room",
+        "latitude": 45.0, "longitude": 9.0, "time": 1,
+        "status": "SEMANTIC", "status_id": 0, "accuracy": 0, "is_own_report": True,
+    }
+    assert custom.forward_to_custom(endpoint_cfg, location, "My Tracker") is True
+    assert captured["url"] == (
+        "https://svc.example/?lat=45.0&lon=9.0&status=SEMANTIC"
+        "&is_semantic=True&semantic_name=Nest Mini - Living Room"
+    )
+
+
 def test_forward_to_custom_skips_when_url_is_blank():
     from webui.forwarders import custom
 
@@ -331,7 +679,7 @@ def test_config_store_round_trip(tmp_path, monkeypatch):
     from webui.forwarders import config_store
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(config, "FORWARDING_CONFIG_PATH", tmp_path / "forwarding.yaml")
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
 
     assert config_store.get_device_config("dev-1") is None
     config_store.set_device_config("dev-1", {"display_name": "X", "endpoints": []})
@@ -339,12 +687,58 @@ def test_config_store_round_trip(tmp_path, monkeypatch):
     assert "dev-1" in config_store.all_devices()
 
 
+def test_config_store_last_load_ok_false_for_corrupt_yaml(tmp_path, monkeypatch):
+    from webui import config
+    from webui.forwarders import config_store
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+
+    assert config_store.load() == config_store._empty()
+    assert config_store.last_load_ok() is True  # no file yet - a fresh install, not a failure
+
+    config.DEVICES_PATH.write_text("not: valid: yaml: [")
+    assert config_store.load() == config_store._empty()
+    assert config_store.last_load_ok() is False
+
+    config.DEVICES_PATH.write_text("devices: {}\n")
+    config_store.load()
+    assert config_store.last_load_ok() is True  # flips back once the file's readable again
+
+
+def test_config_store_last_load_ok_false_for_a_non_mapping_document(tmp_path, monkeypatch):
+    from webui import config
+    from webui.forwarders import config_store
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+    config.DEVICES_PATH.write_text("- just\n- a\n- list\n")
+
+    assert config_store.load() == config_store._empty()
+    assert config_store.last_load_ok() is False
+
+
+def test_config_store_last_load_ok_true_for_a_genuinely_empty_file(tmp_path, monkeypatch):
+    """An empty forwarding.yaml (0 bytes) is a legitimate "no devices yet"
+    state, not a failure - only content that fails to parse as a mapping
+    counts as last_load_ok() going false."""
+    from webui import config
+    from webui.forwarders import config_store
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+    config.DEVICES_PATH.write_text("")
+
+    assert config_store.load() == {"devices": {}}
+    assert config_store.last_load_ok() is True
+
+
 def test_config_store_migrates_legacy_single_destination_shape(tmp_path, monkeypatch):
     from webui import config
     from webui.forwarders import config_store
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(config, "FORWARDING_CONFIG_PATH", tmp_path / "forwarding.yaml")
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
 
     legacy = {
         "display_name": "X",
@@ -385,7 +779,7 @@ def test_config_store_migrates_legacy_endpoints_list_shape(tmp_path, monkeypatch
     from webui.forwarders import config_store
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(config, "FORWARDING_CONFIG_PATH", tmp_path / "forwarding.yaml")
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
 
     legacy = {
         "display_name": "X",
@@ -419,7 +813,7 @@ def test_config_store_folds_leftover_query_params_into_the_url(tmp_path, monkeyp
     from webui.forwarders import config_store
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(config, "FORWARDING_CONFIG_PATH", tmp_path / "forwarding.yaml")
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
 
     legacy = {
         "display_name": "X",
@@ -458,7 +852,7 @@ def test_config_store_migrates_from_legacy_json(tmp_path, monkeypatch):
     from webui.forwarders import config_store
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(config, "FORWARDING_CONFIG_PATH", tmp_path / "forwarding.yaml")
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
     legacy_path = tmp_path / "forwarding_config.json"
     monkeypatch.setattr(config, "FORWARDING_CONFIG_LEGACY_JSON_PATH", legacy_path)
 
@@ -467,7 +861,7 @@ def test_config_store_migrates_from_legacy_json(tmp_path, monkeypatch):
     # First read migrates: loads the JSON, and from then on the YAML file is
     # the source of truth. The old JSON file is left alone, not deleted.
     assert config_store.get_device_config("dev-1") == {"display_name": "X", "endpoints": []}
-    assert config.FORWARDING_CONFIG_PATH.exists()
+    assert config.DEVICES_PATH.exists()
     assert legacy_path.exists()
 
     config_store.set_device_config("dev-2", {"display_name": "Y", "endpoints": []})
@@ -531,6 +925,19 @@ def test_log_store_round_trips_the_full_payload(tmp_path, monkeypatch):
     assert entries[0]["payload"] == payload
 
 
+def test_log_store_round_trips_the_response_body(tmp_path, monkeypatch):
+    from webui import config
+    from webui.forwarders import log_store
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "FORWARD_LOG_PATH", tmp_path / "forward.log")
+
+    log_store.append("dev-1", "My Tracker", "traccar", "http://x", "ok", response='200: {"done":1}')
+
+    entries = log_store.recent_entries()
+    assert entries[0]["response"] == '200: {"done":1}'
+
+
 def test_log_store_reads_pre_payload_lines_as_blank(tmp_path, monkeypatch):
     from webui import config
     from webui.forwarders import log_store
@@ -545,6 +952,24 @@ def test_log_store_reads_pre_payload_lines_as_blank(tmp_path, monkeypatch):
     entries = log_store.recent_entries()
     assert entries[0]["status"] == "ok"
     assert entries[0]["payload"] == ""
+    assert entries[0]["response"] == ""
+
+
+def test_log_store_reads_pre_response_lines_as_blank(tmp_path, monkeypatch):
+    from webui import config
+    from webui.forwarders import log_store
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    log_path = tmp_path / "forward.log"
+    monkeypatch.setattr(config, "FORWARD_LOG_PATH", log_path)
+
+    # A line written before the response column existed - 7 fields, not 8.
+    log_path.write_text("1\tdev-1\tMy Tracker\ttraccar\thttp://x\tok\tsome-payload\n")
+
+    entries = log_store.recent_entries()
+    assert entries[0]["status"] == "ok"
+    assert entries[0]["payload"] == "some-payload"
+    assert entries[0]["response"] == ""
 
 
 def test_log_store_sanitizes_embedded_tabs_and_newlines(tmp_path, monkeypatch):
@@ -554,22 +979,31 @@ def test_log_store_sanitizes_embedded_tabs_and_newlines(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "FORWARD_LOG_PATH", tmp_path / "forward.log")
 
-    log_store.append("dev-1", "My\tTracker", "traccar", "http://x", "error: line one\nline two")
+    log_store.append(
+        "dev-1", "My\tTracker", "traccar", "http://x", "error: line one\nline two",
+        response="500: multi\nline\tbody",
+    )
 
     entries = log_store.recent_entries()
     assert "\t" not in entries[0]["device_name"]
     assert "\n" not in entries[0]["status"]
+    assert "\t" not in entries[0]["response"]
+    assert "\n" not in entries[0]["response"]
     # One log line per entry - a literal newline in the status would have split it in two.
     assert config.FORWARD_LOG_PATH.read_text().count("\n") == 1
 
 
 def test_log_store_caps_entries(tmp_path, monkeypatch):
-    from webui import config
+    from webui import config, line_log_io
     from webui.forwarders import log_store
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "FORWARD_LOG_PATH", tmp_path / "forward.log")
     monkeypatch.setattr(config, "FORWARD_LOG_MAX_ENTRIES", 5)
+    # append_line() only compacts once every _COMPACT_SLACK entries past the
+    # cap (see line_log_io.py) - force it to 0 so this test still checks the
+    # cap logic itself, without depending on that amortization tuning.
+    monkeypatch.setattr(line_log_io, "_COMPACT_SLACK", 0)
 
     for i in range(10):
         log_store.append("dev-1", "My Tracker", "traccar", "target", f"status-{i}")
@@ -577,3 +1011,39 @@ def test_log_store_caps_entries(tmp_path, monkeypatch):
     entries = log_store.recent_entries()
     assert len(entries) == 5
     assert entries[0]["status"] == "status-9"  # newest first, oldest 5 dropped
+
+
+def test_device_label_variables_only_offers_fields_this_device_actually_has():
+    from webui.forwarders import device_label_variables
+
+    device_meta = {
+        "manufacturer": "Chipolo", "model": "ONE Point", "type": "Keys", "image_url": "https://x/p.png",
+        "carrier": "", "codename": "", "imei": "", "registered_at": "", "shared_with": "",
+    }
+    assert device_label_variables(device_meta) == []  # a non-phone tracker: no label_* chip is a false promise
+
+
+def test_device_label_variables_offers_only_the_truthy_phone_only_fields():
+    from webui.forwarders import device_label_variables
+
+    device_meta = {
+        "manufacturer": "Google", "model": "Pixel", "type": "Phone", "image_url": "",
+        "carrier": "T-Mobile", "codename": "", "imei": "354935091234567", "registered_at": "",
+        "shared_with": "family@example.com",
+    }
+    names = [name for name, _ in device_label_variables(device_meta)]
+    assert names == ["label_carrier", "label_imei", "label_shared_with"]  # blank codename/registered_at excluded
+
+
+def test_device_label_variables_handles_missing_device_meta():
+    from webui.forwarders import device_label_variables
+
+    assert device_label_variables(None) == []
+    assert device_label_variables({}) == []
+
+
+def test_device_label_variables_falls_back_to_a_generic_description():
+    from webui.forwarders import device_label_variables
+
+    names_and_descriptions = device_label_variables({"a_future_field": "x"})
+    assert names_and_descriptions == [("label_a_future_field", "This device's a future field, from Google's own response")]

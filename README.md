@@ -6,7 +6,7 @@
 
 [![Lint and test](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/actions/workflows/test.yml/badge.svg)](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/actions/workflows/test.yml)
 
-A self-hosted app that logs into your Google account, keeps polling your Find My Device trackers and Android phones, and forwards each new location to your own Traccar or Nextcloud PhoneTrack server, so you keep your location history on your own infrastructure instead of nowhere. One Docker container, a web UI, nothing else to run.
+A self-hosted app that logs into your Google account, keeps polling your Find My Device / Find Hub trackers and Android phones, and forwards each new location to your own Traccar or Nextcloud PhoneTrack server, so you keep your location history on your own infrastructure instead of nowhere. One Docker container, a web UI, nothing else to run.
 
 It's built on top of [GoogleFindMyTools](https://github.com/leonboe1/GoogleFindMyTools), the original reverse-engineering work that figured out how to talk to Google's Find My Device / Find Hub network at the protocol level (querying trackers, decrypting end-to-end encrypted locations, registering custom ESP32/Zephyr trackers). That original tool is still in here and still works as a set of Python scripts - see [Advanced: running it as a CLI tool](#advanced-running-it-as-a-cli-tool) below. Everything described in the rest of this README is a self-hosted app built around it: a web UI, a scheduler, multi-destination forwarding, and the operational stuff (logging, throttling, auth, encryption at rest) a service you actually leave running needs.
 
@@ -20,6 +20,7 @@ It's built on top of [GoogleFindMyTools](https://github.com/leonboe1/GoogleFindM
 - **Skip pointless updates** - two independent, opt-in gates per destination: skip sending if the device hasn't moved far enough, and skip re-sending the same stale cached fix Google keeps returning. Both are local math (haversine distance), no external API calls, no extra cost.
 - **Logging** - every forwarding attempt and every warning/error anywhere in the app (a failed locate, an expired token, a forwarding failure) lands in a searchable in-app log, with errors also pushed out live through [Apprise](https://github.com/caronc/apprise) to whatever you already use (ntfy, Discord, Telegram, Pushover, email, 100+ others) - configured from the Config page, no restart needed.
 - **Register your own trackers** - pair a custom ESP32- or Zephyr-based BLE tracker straight from the web UI.
+- **Build and flash ESP32 firmware from the browser** - the Firmware page bakes a registered tracker's key into an ESP32/ESP32-C3 build (device name, advertising interval, TX power, and the unwanted-tracking-protection flag are all configurable), then flashes it over USB via Web Serial, or gives you a plain `.bin` to flash yourself. Still marked experimental in the UI - hasn't been exercised across every board/setup yet. Other Zephyr-supported boards link out to a manual build/flash guide instead.
 - **Account-wide rate limiting** - every call to Google's backend (device list, locate, sound, register) goes through one shared throttle, tunable live from the Config page, so a burst of manual clicks and every device's poll loop can never combine into something that gets your account flagged.
 - **`/metrics`** - a small set of Prometheus-format gauges (uptime, sign-in status, query-throttle queue depth, forwarding/system log entry counts by outcome) if you already scrape other self-hosted services and want this one in the same dashboard. Behind the same Basic Auth as everything else when configured.
 
@@ -58,13 +59,32 @@ Copy `.env.example` to `.env` and fill in what you need, or pass these directly 
 | `GFMT_TLS_CERT_PATH` / `GFMT_TLS_KEY_PATH` | unset | Bring your own cert/key instead of the self-signed one - both must point at existing files, or startup fails rather than silently falling back to self-signed. |
 | `GFMT_TLS_SAN` | unset | Comma-separated extra hostnames/IPs to add to the generated self-signed cert (it always covers `localhost`/`127.0.0.1`/`::1`) - set this to your LAN hostname or static IP if you reach the box by either. |
 | `GFMT_TLS_VALIDITY_DAYS` | 825 | How long a generated self-signed cert is valid for. Defaults to Apple's ATS cap (Safari/iOS/macOS reject longer-lived certs even after you manually trust them) - raise it if you don't care about Safari. |
+| `DEMO_MODE` | unset | Set to `1` for a public-showcase demo instance: every page shows a fixed set of fake devices instead of a real account, real Google sign-in and every outbound network call are disabled, Firmware Build and Debug Export's live query are disabled, and nothing a visitor does is ever persisted - see [Demo mode](#demo-mode) below. |
 
 The Config page also has fields for the query throttle and Apprise notification settings, applied immediately without a restart.
+
+### Demo mode
+
+Set `DEMO_MODE=1` to run a public-facing instance that shows off the UI with no real Google account and no real data at all - useful for a public demo link, a quick local screenshot/dev aid, or a CI/screenshot-testing fixture. It's the same image everyone else runs, just this one env var - not a separate build.
+
+With it on:
+- Every page (Devices, Firmware, Forwarding Settings, Staleness, Logs, Config) shows the same fixed set of ~10 fake devices (deterministic, same every restart), realistic Bay Area coordinates, no movement.
+- Locate/Play Sound/Register Tracker all return a fake success instantly - nothing real is contacted.
+- Forwarding Settings comes pre-filled with example endpoints pointed at obviously-fake (`.invalid`) hosts; saving or "Send now" always simulates success and is never actually sent or persisted.
+- Staleness tracking shows a realistic mix of fresh/stale devices from the fixed dataset; toggling tracking works but is never persisted.
+- The Logs page shows canned example history instead of this process's own logs.
+- **Firmware Build is disabled outright** (not simulated) - it's a real multi-minute compile with a real toolchain download, too heavy/real to fake safely.
+- **Debug Export's "Live API query" is disabled outright** - it would otherwise run a real, uncached device-list + locate-all query. The logs-only export still works, with the canned demo logs.
+- Real Google sign-in is disabled server-side (not just the greyed-out button) - a public instance can never be made to spin up the real embedded-browser login flow.
+- Every outbound network call this process could make is additionally hard-blocked at a low level, regardless of what a visitor types into any form - see `webui/demo_network_guard.py`.
+- Nothing a visitor does is ever written to disk; a small `🚩 Demo` flag next to the build id in the footer is the only visual tell.
+
+Independently of `DEMO_MODE`, any normal instance (the env var unset) with no Google account signed in yet shows the same fake devices on the Devices page only, as an onboarding placeholder instead of an empty table - real sign-in stays fully live, and this never affects Settings/Staleness/Logs/Firmware/write-actions.
 
 ## Security
 
 > [!CAUTION]
-> By default this is plain HTTP with no auth - meant for a trusted LAN (or behind your own reverse proxy/VPN if you need remote access), not exposed directly to the public internet. `HTTPS_ENABLED=1` gets you transport encryption (see below), but self-signed TLS still isn't the same as a real reverse proxy or VPN for anything beyond casual LAN use.
+> By default this is plain HTTP with no auth - meant for a trusted LAN (or behind your own reverse proxy/VPN if you need remote access), not exposed directly to the public internet. `HTTPS_ENABLED=1` gets you transport encryption (see below), but self-signed TLS still isn't the same as a real reverse proxy or VPN for anything beyond casual LAN use. The one supported way to expose this app to the public internet is [`DEMO_MODE=1`](#demo-mode), which runs with no real account, no real data, and no outbound network access at all.
 
 - Set `HTTP_USER`/`HTTP_PASSWORD` to gate the whole UI, including `/docs` (FastAPI's interactive API explorer) - it's one more route behind the same middleware, not a separate hole.
 - Set `HTTPS_ENABLED=1` to serve HTTPS with an automatically generated, persisted self-signed certificate - no separate reverse proxy needed. Your browser will show a one-time "not trusted" warning the first time (expected for any self-signed cert, not a sign something's wrong) - accept/pin it, or point `GFMT_TLS_CERT_PATH`/`GFMT_TLS_KEY_PATH` at a real cert instead if you have one. This defeats passive network snooping but gives no identity guarantee the way a CA-signed cert does. It's a toggle, not a dual mode - with it on, plain `http://` to the same port gets a connection reset, not a redirect.
@@ -89,6 +109,5 @@ On first run this walks you through the same Google sign-in as the web UI, stori
 
 ## TODO
 
-- Finish the live data scraper: battery level, wifi, wifi signal strength, force a phone update.
-- ESP32 firmware builder in the web UI.
+- Finish the live data scraper: battery level, wifi, wifi signal strength, force a phone update and any other data found via this api.
 - AirTag support, with the help of a reverse-engineered locate app: [AirtagAlex](https://github.com/icepick3000/AirtagAlex/blob/main/AirtagAlex.sh), [demo video](https://www.youtube.com/watch?v=9VQ-_ztG9aM).

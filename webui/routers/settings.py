@@ -4,13 +4,18 @@ import yaml
 from croniter import croniter
 from fastapi import APIRouter, Form, HTTPException, Request
 
-from NovaApi.ListDevices.nbe_list_devices import request_device_list
-from ProtoDecoders.decoder import get_canonic_ids, parse_device_list_protobuf
-from webui import scheduler
+from webui import demo_mode, scheduler
 from webui.auth_state import is_logged_in
-from webui.deps import run_blocking
-from webui.device_list_cache import device_list_cache
-from webui.forwarders import BUILTIN_VARIABLES, PRESETS, config_store, latest_values_store, policy
+from webui.forwarders import (
+    BUILTIN_VARIABLES_FROM_APP,
+    BUILTIN_VARIABLES_FROM_FIX,
+    PRESETS,
+    config_store,
+    device_label_variables,
+    latest_values_store,
+    policy,
+    settings_service,
+)
 from webui.forwarders import blank_endpoint as new_blank_endpoint
 from webui.templating import templates
 
@@ -27,92 +32,12 @@ router = APIRouter()
 _PRESETS_JSON = json.dumps(PRESETS).replace("</", "<\\/")
 
 _TEMPLATE_CONTEXT = {
-    "presets": PRESETS, "builtin_variables": BUILTIN_VARIABLES, "presets_json": _PRESETS_JSON,
+    "presets": PRESETS, "presets_json": _PRESETS_JSON,
+    "builtin_variables_from_fix": BUILTIN_VARIABLES_FROM_FIX,
+    "builtin_variables_from_app": BUILTIN_VARIABLES_FROM_APP,
     "cron_presets": scheduler.CRON_PRESETS, "cron_preset_values": {value for _, value in scheduler.CRON_PRESETS},
+    "status_choices": policy.STATUS_CHOICES,
 }
-
-
-async def _rows(overrides: dict[str, dict] | None = None, saved_id: str | None = None) -> list[dict]:
-    def _fetch():
-        result_hex = request_device_list()
-        device_list = parse_device_list_protobuf(result_hex)
-        return get_canonic_ids(device_list)
-
-    canonic_ids = await run_blocking(device_list_cache.get_or_fetch, _fetch)
-    devices = config_store.all_devices()
-
-    rows = []
-    for google_name, canonic_id, _last_seen in canonic_ids:
-        device_cfg = devices.get(canonic_id)
-        if device_cfg is None:
-            # Blank, not google_name - a device that's never actually been
-            # saved must not have its alias field show up pre-filled with
-            # the account name (see _device_form.html's "Device alias"
-            # input comment for why that's wrong: it'd look deliberately
-            # typed in, and a save with the field untouched would silently
-            # pin display_name to it forever). row["name"] below still
-            # falls back to google_name on its own for display purposes
-            # (the heading etc.), so nothing here loses that.
-            device_cfg = {"display_name": "", "endpoints": []}
-        elif device_cfg.get("google_name") != google_name:
-            # Keep the account's real name in sync on local disk too (only
-            # for devices actually saved already - this must never be what
-            # creates a config entry for a device the user hasn't added).
-            # webui/scheduler.py's poll loop never talks to Google's API
-            # itself, so this is the only place {{device_name}} (see
-            # webui/forwarders/custom.py) has anywhere to read the real name
-            # from at forward time - {{device_alias}} instead reads
-            # display_name, the separate local nickname set below.
-            device_cfg = dict(device_cfg, google_name=google_name)
-            config_store.set_device_config(canonic_id, device_cfg)
-            devices[canonic_id] = device_cfg
-        save_error = None
-        if overrides and canonic_id in overrides:
-            device_cfg = overrides[canonic_id]["config"]
-            save_error = overrides[canonic_id]["error"]
-        # Runtime state (last forward status/time, last-sent position) isn't
-        # config anymore - see webui/forwarders/latest_values_store.py - so
-        # it never comes back from config_store above; merge it into each
-        # endpoint here, display-only, so _endpoint_fields.html's "Last
-        # forward: ..." line still has something to read. Safe to mutate in
-        # place: device_cfg is always a fresh dict (freshly loaded, or a
-        # freshly-built override above), never re-persisted after this point.
-        for ep in device_cfg.get("endpoints", []):
-            if isinstance(ep, dict):
-                state = latest_values_store.get_endpoint_state(canonic_id, ep.get("url", ""))
-                if state:
-                    ep.update(state)
-        # The stored display_name is a user-set alias (Google's own device name is
-        # sometimes cryptic/confusing) - fall back to Google's name until one is set.
-        alias = device_cfg.get("display_name") or google_name
-        rows.append({
-            "name": alias,
-            "google_name": google_name,
-            "canonic_id": canonic_id,
-            "config": device_cfg,
-            "save_error": save_error,
-            "saved": canonic_id == saved_id,
-        })
-    return rows
-
-
-async def _row(canonic_id: str, overrides: dict[str, dict] | None = None, saved: bool = False) -> dict:
-    """The single row a device's own save POST should come back as - saving one
-    device's form must not hand the browser the whole page's worth of forms to
-    swap into that one form's slot (see _device_row.html)."""
-    rows = await _rows(overrides=overrides, saved_id=canonic_id if saved else None)
-    fallback = (overrides or {}).get(canonic_id, {})
-    return next(
-        (r for r in rows if r["canonic_id"] == canonic_id),
-        {
-            "name": fallback.get("config", {}).get("display_name", canonic_id),
-            "google_name": None,
-            "canonic_id": canonic_id,
-            "config": fallback.get("config", {"endpoints": []}),
-            "save_error": fallback.get("error"),
-            "saved": saved,
-        },
-    )
 
 
 @router.get("/settings")
@@ -120,47 +45,8 @@ async def settings_page(request: Request):
     if not is_logged_in():
         return templates.TemplateResponse(request, "_not_signed_in.html", {})
     return templates.TemplateResponse(request, "settings/forwarding.html", {
-        "rows": await _rows(), **_TEMPLATE_CONTEXT,
+        "rows": await settings_service.rows(), **_TEMPLATE_CONTEXT,
     })
-
-
-def _to_yaml_doc(endpoints: list[dict]) -> dict:
-    """The YAML editor's view of a device: just its endpoints - no
-    "display_name" (that's the "Device alias" field's job; editing the same
-    thing a second time here would be redundant and the two could drift),
-    no "google_name" (read-only, fed from Google's own device list,
-    never user-configurable - see _rows above), and no per-endpoint "type"
-    (see _parse_endpoints_form below - always the same generic query-
-    builder shape now, never a saved property, so it would never say
-    anything a human didn't already know)."""
-    clean_endpoints = [{k: v for k, v in ep.items() if k != "type"} for ep in endpoints]
-    return {"endpoints": clean_endpoints}
-
-
-def _from_yaml_doc(yaml_text: str) -> tuple[list[dict], str | None]:
-    """Inverse of _to_yaml_doc: (endpoints, error). Shared by the real save
-    route and the live "switch to form" preview below, so both reject the
-    same malformed input the same way. Cron validity is deliberately not
-    checked here - that's a save-time concern (see the matching check in
-    save_device_yaml_route), not a parse-time one; a live preview should
-    never refuse to just show you what you typed."""
-    try:
-        parsed = yaml.safe_load(yaml_text)
-        if parsed is None:
-            parsed = {}
-        if not isinstance(parsed, dict):
-            raise ValueError("must be a mapping (e.g. \"endpoints: [...]\"), not a list or a bare value")
-        parsed.setdefault("endpoints", [])
-        if not isinstance(parsed["endpoints"], list):
-            raise ValueError("\"endpoints\" must be a list")
-        for i, endpoint in enumerate(parsed["endpoints"]):
-            if not isinstance(endpoint, dict):
-                raise ValueError(f"endpoints[{i}] must be a mapping")
-    except (yaml.YAMLError, ValueError) as e:
-        return [], f"Invalid YAML: {e}"
-
-    endpoints = [{k: v for k, v in ep.items() if k != "type"} for ep in parsed["endpoints"]]
-    return endpoints, None
 
 
 @router.get("/settings/devices/{canonic_id}")
@@ -171,7 +57,7 @@ async def device_form_route(request: Request, canonic_id: str):
     which reflects not-yet-saved YAML edits instead)."""
     if not is_logged_in():
         return templates.TemplateResponse(request, "_not_signed_in.html", {})
-    row = await _row(canonic_id)
+    row = await settings_service.row(canonic_id)
     return templates.TemplateResponse(request, "settings/_device_form.html", {
         "row": row, **_TEMPLATE_CONTEXT,
     })
@@ -184,17 +70,20 @@ async def device_yaml_route(request: Request, canonic_id: str):
     below), for the same reason as device_form_route above."""
     if not is_logged_in():
         return templates.TemplateResponse(request, "_not_signed_in.html", {})
-    row = await _row(canonic_id)
+    row = await settings_service.row(canonic_id)
     yaml_text = yaml.safe_dump(
-        _to_yaml_doc(row["config"].get("endpoints", [])), sort_keys=False, allow_unicode=True,
+        settings_service.to_yaml_doc(row["config"].get("display_name", ""), row["config"].get("endpoints", [])),
+        sort_keys=False, allow_unicode=True,
     )
     return templates.TemplateResponse(request, "settings/_device_yaml.html", {
-        "canonic_id": canonic_id, "name": row["name"], "yaml_text": yaml_text,
+        "canonic_id": canonic_id, "name": row["name"], "google_name": row["google_name"],
+        "alias": row["config"].get("display_name") or "", "yaml_text": yaml_text,
+        "label_variables": row["label_variables"], **_TEMPLATE_CONTEXT,
     })
 
 
 @router.post("/settings/devices/{canonic_id}/yaml/preview")
-async def device_yaml_preview_route(request: Request, canonic_id: str, display_name: str = Form(...)):
+async def device_yaml_preview_route(request: Request, canonic_id: str, display_name: str = Form("")):
     """The "Edit as YAML" button's actual target: converts the form's
     current field values - including whatever's been typed but not yet
     saved - into YAML, entirely in memory. Switching views this way never
@@ -206,14 +95,18 @@ async def device_yaml_preview_route(request: Request, canonic_id: str, display_n
 
     form = await request.form()
     existing = config_store.get_device_config(canonic_id) or {"endpoints": []}
-    endpoints, _errors = _parse_endpoints_form(form, existing.get("endpoints", []))
-    yaml_text = yaml.safe_dump(_to_yaml_doc(endpoints), sort_keys=False, allow_unicode=True)
-    # The alias field is blank until one's actually set (see
-    # _device_form.html) - fall back the same way row.name/_rows does, so
-    # this heading doesn't just go blank for a device with no alias yet.
-    name = display_name.strip() or existing.get("google_name") or canonic_id
+    endpoints, _errors = settings_service.parse_endpoints_form(form, existing.get("endpoints", []))
+    yaml_text = yaml.safe_dump(settings_service.to_yaml_doc(display_name, endpoints), sort_keys=False, allow_unicode=True)
+    # The heading is always the fixed Google name (falling back to the
+    # just-typed alias, then canonic_id, only when google_name is itself
+    # unknown) - same rule as _device_form.html's own legend. The alias
+    # shows too, small, next to it - see _device_yaml.html.
+    google_name = existing.get("google_name") or ""
+    name = google_name or display_name.strip() or canonic_id
     return templates.TemplateResponse(request, "settings/_device_yaml.html", {
-        "canonic_id": canonic_id, "name": name, "yaml_text": yaml_text,
+        "canonic_id": canonic_id, "name": name, "google_name": google_name, "alias": display_name.strip(),
+        "yaml_text": yaml_text,
+        "label_variables": device_label_variables(existing.get("device_meta")), **_TEMPLATE_CONTEXT,
     })
 
 
@@ -221,24 +114,24 @@ async def device_yaml_preview_route(request: Request, canonic_id: str, display_n
 async def device_form_preview_route(request: Request, canonic_id: str, yaml_text: str = Form(...)):
     """The YAML view's "Edit as form" button's actual target - the mirror
     image of device_yaml_preview_route above: parses whatever's currently
-    typed in the YAML textarea back into the form, without saving it."""
+    typed in the YAML textarea - including its display_name - back into
+    the form, without saving it."""
     if not is_logged_in():
         return templates.TemplateResponse(request, "_not_signed_in.html", {})
 
-    # The YAML never carries the alias (see _to_yaml_doc) - that's the
-    # "Device alias" field's job - so whatever's already saved for it just
-    # carries straight through untouched here.
     existing = config_store.get_device_config(canonic_id) or {}
-    endpoints, error = _from_yaml_doc(yaml_text)
+    endpoints, display_name, error = settings_service.from_yaml_doc(yaml_text)
     if error:
-        name = existing.get("display_name") or existing.get("google_name") or canonic_id
+        google_name = existing.get("google_name") or ""
+        name = google_name or existing.get("display_name") or canonic_id
         return templates.TemplateResponse(request, "settings/_device_yaml.html", {
-            "canonic_id": canonic_id, "name": name, "yaml_text": yaml_text,
-            "error": error,
+            "canonic_id": canonic_id, "name": name, "google_name": google_name,
+            "alias": existing.get("display_name") or "", "yaml_text": yaml_text,
+            "error": error, "label_variables": device_label_variables(existing.get("device_meta")), **_TEMPLATE_CONTEXT,
         })
 
-    device_cfg = {"display_name": existing.get("display_name", ""), "endpoints": endpoints}
-    row = await _row(canonic_id, overrides={canonic_id: {"config": device_cfg, "error": None}})
+    device_cfg = {"display_name": display_name, "endpoints": endpoints}
+    row = await settings_service.row(canonic_id, overrides={canonic_id: {"config": device_cfg, "error": None}})
     return templates.TemplateResponse(request, "settings/_device_form.html", {
         "row": row, **_TEMPLATE_CONTEXT,
     })
@@ -249,12 +142,13 @@ async def save_device_yaml_route(request: Request, canonic_id: str, yaml_text: s
     if not is_logged_in():
         return templates.TemplateResponse(request, "_not_signed_in.html", {})
 
-    row = await _row(canonic_id)
-    endpoints, error = _from_yaml_doc(yaml_text)
+    row = await settings_service.row(canonic_id)
+    endpoints, display_name, error = settings_service.from_yaml_doc(yaml_text)
     if error:
         return templates.TemplateResponse(request, "settings/_device_yaml.html", {
-            "canonic_id": canonic_id, "name": row["name"], "yaml_text": yaml_text,
-            "error": error,
+            "canonic_id": canonic_id, "name": row["name"], "google_name": row["google_name"],
+            "alias": row["config"].get("display_name") or "", "yaml_text": yaml_text,
+            "error": error, "label_variables": row["label_variables"], **_TEMPLATE_CONTEXT,
         })
 
     # The form path (update_device_settings below) has always rejected an
@@ -268,29 +162,44 @@ async def save_device_yaml_route(request: Request, canonic_id: str, yaml_text: s
     ]
     if cron_errors:
         return templates.TemplateResponse(request, "settings/_device_yaml.html", {
-            "canonic_id": canonic_id, "name": row["name"], "yaml_text": yaml_text,
-            "error": "; ".join(cron_errors),
+            "canonic_id": canonic_id, "name": row["name"], "google_name": row["google_name"],
+            "alias": row["config"].get("display_name") or "", "yaml_text": yaml_text,
+            "error": "; ".join(cron_errors), "label_variables": row["label_variables"], **_TEMPLATE_CONTEXT,
         })
 
-    # Neither the alias nor google_name are part of what this editor shows
-    # (see _to_yaml_doc) - carry both forward from what's already on disk
-    # instead of losing them.
+    # google_name isn't part of what this editor shows (see to_yaml_doc) -
+    # carry it forward from what's already on disk instead of losing it.
+    # display_name *is* part of what this editor shows, so whatever was
+    # just typed here is what gets saved, same as the form's own alias
+    # field would.
     existing = config_store.get_device_config(canonic_id)
-    device_cfg = {"display_name": (existing or {}).get("display_name", ""), "endpoints": endpoints}
+    device_cfg = {"display_name": display_name, "endpoints": endpoints}
     if existing and existing.get("google_name"):
         device_cfg["google_name"] = existing["google_name"]
+    # device_meta isn't part of what this editor shows either (see
+    # to_yaml_doc) - same reason as google_name just above: carry it
+    # forward too, or this device's label_* chips go missing until the
+    # next page load's sync happens to run again.
+    if existing and existing.get("device_meta"):
+        device_cfg["device_meta"] = existing["device_meta"]
 
     try:
         config_store.set_device_config(canonic_id, device_cfg)
         scheduler.restart_device(canonic_id)
     except Exception as e:
         return templates.TemplateResponse(request, "settings/_device_yaml.html", {
-            "canonic_id": canonic_id, "name": row["name"], "yaml_text": yaml_text,
-            "error": f"Failed to save: {e}",
+            "canonic_id": canonic_id, "name": row["name"], "google_name": row["google_name"],
+            "alias": row["config"].get("display_name") or "", "yaml_text": yaml_text,
+            "error": f"Failed to save: {e}", "label_variables": row["label_variables"], **_TEMPLATE_CONTEXT,
         })
     latest_values_store.prune_to_urls(canonic_id, {ep["url"] for ep in endpoints})
 
-    fresh_row = await _row(canonic_id, saved=True)
+    # In demo mode, config_store.set_device_config() above was a no-op (see
+    # webui/device_store.py) - re-reading now would just show the fixed seed
+    # again, not what was just typed. Echo the just-built device_cfg back
+    # instead, for this one response only - same "saved" toast either way.
+    saved_overrides = {canonic_id: {"config": device_cfg, "error": None}} if demo_mode.is_demo_mode() else None
+    fresh_row = await settings_service.row(canonic_id, overrides=saved_overrides, saved=True)
     return templates.TemplateResponse(request, "settings/_device_form.html", {
         "row": fresh_row, **_TEMPLATE_CONTEXT,
     })
@@ -318,8 +227,18 @@ async def blank_endpoint_route(request: Request, canonic_id: str):
         return templates.TemplateResponse(request, "_not_signed_in.html", {})
 
     blank = new_blank_endpoint(scheduler.DEFAULT_CRON)
+    # Rendered outside the per-device-row loop (same reason as send_now_route
+    # below), so `row` isn't in scope the normal way either - a bare stub
+    # just carrying label_variables lets the "From the location fix" chip
+    # list still reflect this device's real data on a brand-new block. Safe
+    # against the template's only other row-gated behavior (the "Send now"
+    # button) since that's already conditioned on "not is_new" too, and
+    # is_new is always True here.
+    device_meta = (config_store.get_device_config(canonic_id) or {}).get("device_meta")
     return templates.TemplateResponse(request, "settings/_endpoint_fields.html", {
-        "endpoint": blank, "idx": "__NEW__", "is_new": True, **_TEMPLATE_CONTEXT,
+        "endpoint": blank, "idx": "__NEW__", "is_new": True,
+        "row": {"label_variables": device_label_variables(device_meta)},
+        **_TEMPLATE_CONTEXT,
     })
 
 
@@ -355,146 +274,64 @@ async def send_now_route(request: Request, canonic_id: str, index: int):
     # needs the device id and this endpoint's position) can't rely on `row`/
     # `loop.index0` being in scope the way the normal page render provides them
     # - pass both explicitly instead, so the swapped-in fragment can still be
-    # sent again immediately.
+    # sent again immediately. label_variables is included too so the chip
+    # list still reflects this device's real data after the swap.
+    device_meta = (config_store.get_device_config(canonic_id) or {}).get("device_meta")
     return templates.TemplateResponse(request, "settings/_endpoint_fields.html", {
-        "endpoint": endpoint, "row": {"canonic_id": canonic_id}, "idx": str(index),
-        "send_error": send_error, **_TEMPLATE_CONTEXT,
+        "endpoint": endpoint,
+        "row": {"canonic_id": canonic_id, "label_variables": device_label_variables(device_meta)},
+        "idx": str(index), "send_error": send_error, **_TEMPLATE_CONTEXT,
     })
-
-
-def _parse_kv_rows(keys: list[str], values: list[str]) -> dict:
-    return {k.strip(): v for k, v in zip(keys, values) if k.strip()}
-
-
-def _parse_endpoints_form(form, existing_endpoints: list[dict]) -> tuple[list[dict], list[str]]:
-    """(endpoints, errors) straight off a posted device form - shared by the
-    real save route below and device_yaml_preview_route above, so switching
-    to the YAML view while mid-edit reflects the same not-yet-saved values
-    instead of whatever's still on disk.
-
-    Every endpoint block's fields are namespaced "ep-{idx}-{field}", with idx
-    unique per block (its saved position, or a fresh client-generated id for
-    one just added via "+ Add endpoint" - see endpoint_fields.js). That,
-    rather than one flat getlist() per field name shared across every
-    endpoint, is what lets each block carry its own variable-length headers
-    table without the rows of one block bleeding into another's."""
-    ep_order = form.getlist("ep_order")
-
-    endpoints = []
-    errors = []
-    for idx in ep_order:
-        def field(name: str, default: str = "") -> str:
-            return form.get(f"ep-{idx}-{name}", default) or default
-
-        def field_list(name: str) -> list[str]:
-            return form.getlist(f"ep-{idx}-{name}")
-
-        url = field("url").strip()
-        if not url:
-            continue  # unfilled "+ Add endpoint" block, drop it silently
-
-        # A preset (see the "Preset" dropdown, only ever shown on a
-        # brand-new "+ Add endpoint" block - webui/forwarders/presets.py) is
-        # a one-time template for starting an endpoint, never a saved
-        # property of one - whatever the dropdown said (if it was even
-        # posted at all) is ignored here. Endpoints don't carry a "type"
-        # either - every one saved through this form is the same generic
-        # query-builder shape, so a stored "type: custom" would never say
-        # anything a human didn't already know.
-        entry = {
-            "method": (field("method", "GET").strip().upper() or "GET"),
-            "url": url,
-            "headers": _parse_kv_rows(field_list("header_key"), field_list("header_value")),
-            "body_type": field("body_type", "none").strip() or "none",
-            "body": field("body"),
-        }
-
-        alias = field("alias").strip()
-        if alias:
-            entry["alias"] = alias
-
-        cron_expr = field("cron").strip()
-        if not cron_expr or not croniter.is_valid(cron_expr):
-            errors.append(f"Endpoint {len(endpoints) + 1}: \"{cron_expr}\" is not a valid cron expression")
-        entry["cron"] = cron_expr or scheduler.DEFAULT_CRON
-
-        if field("skip_if_close", "0") == "1":
-            entry["skip_if_close"] = True
-            try:
-                entry["min_movement_m"] = float(field("min_movement_m") or policy.DEFAULT_MIN_MOVEMENT_M)
-            except ValueError:
-                entry["min_movement_m"] = policy.DEFAULT_MIN_MOVEMENT_M
-
-        if field("skip_if_stale", "0") == "1":
-            entry["skip_if_stale"] = True
-            try:
-                entry["min_update_gap_m"] = float(field("min_update_gap_m") or policy.DEFAULT_MIN_UPDATE_GAP_M)
-            except ValueError:
-                entry["min_update_gap_m"] = policy.DEFAULT_MIN_UPDATE_GAP_M
-
-        # Opposite default from the two toggles above: this one is *on* by
-        # default (see policy._skip_already_seen), so "off" has to be a real
-        # persisted False rather than the key's absence - which is what the
-        # other two toggles rely on for their own (off) default.
-        if field("skip_if_already_seen", "1") != "1":
-            entry["skip_if_already_seen"] = False
-
-        # Same on-by-default convention as skip_if_already_seen above - see
-        # policy._skip_not_most_recent.
-        if field("only_most_recent", "1") != "1":
-            entry["only_most_recent"] = False
-
-        # Best-effort: carry forward any leftover "variables" (from before
-        # the settings UI dropped the "Custom variables" table - there's no
-        # field left to re-post one, so without this a save would silently
-        # erase e.g. a Traccar endpoint's device_id) if it still looks like
-        # the same logical endpoint (same position, same URL). Last-forward
-        # status/position isn't config at all anymore - see
-        # webui/forwarders/latest_values_store.py, keyed by URL rather than
-        # position, so it survives a save like this with no carry-forward
-        # step needed here.
-        position = len(endpoints)
-        if position < len(existing_endpoints) and existing_endpoints[position].get("url") == url:
-            if "variables" in existing_endpoints[position]:
-                entry["variables"] = existing_endpoints[position]["variables"]
-
-        endpoints.append(entry)
-
-    return endpoints, errors
 
 
 @router.post("/settings/devices/{canonic_id}")
 async def update_device_settings(
     request: Request,
     canonic_id: str,
-    display_name: str = Form(...),
+    display_name: str = Form(""),
 ):
     if not is_logged_in():
         return templates.TemplateResponse(request, "_not_signed_in.html", {})
 
     form = await request.form()
     existing = config_store.get_device_config(canonic_id) or {"endpoints": []}
-    endpoints, errors = _parse_endpoints_form(form, existing.get("endpoints", []))
+    endpoints, errors = settings_service.parse_endpoints_form(form, existing.get("endpoints", []))
+
+    # google_name/device_meta aren't fields this form ever edits (see
+    # settings_service.rows' own Google-sync comment) - carry them forward
+    # from what's already on disk rather than just building
+    # {display_name, endpoints} and letting them go missing until the next
+    # page load's sync happens to run again. Without this, a plain settings
+    # save (e.g. just typing an alias) wiped google_name too, and
+    # {{device_name}} fell back to that alias instead of staying the fixed
+    # Google account name.
+    device_cfg = {"display_name": display_name, "endpoints": endpoints}
+    if existing.get("google_name"):
+        device_cfg["google_name"] = existing["google_name"]
+    if existing.get("device_meta"):
+        device_cfg["device_meta"] = existing["device_meta"]
 
     if errors:
-        device_cfg = {"display_name": display_name, "endpoints": endpoints}
-        row = await _row(canonic_id, overrides={canonic_id: {"config": device_cfg, "error": "; ".join(errors)}})
+        row = await settings_service.row(canonic_id, overrides={canonic_id: {"config": device_cfg, "error": "; ".join(errors)}})
         return templates.TemplateResponse(request, "settings/_device_form.html", {
             "row": row, **_TEMPLATE_CONTEXT,
         })
 
-    device_cfg = {"display_name": display_name, "endpoints": endpoints}
     try:
         config_store.set_device_config(canonic_id, device_cfg)
         scheduler.restart_device(canonic_id)
     except Exception as e:
-        row = await _row(canonic_id, overrides={canonic_id: {"config": device_cfg, "error": f"Failed to save: {e}"}})
+        row = await settings_service.row(canonic_id, overrides={canonic_id: {"config": device_cfg, "error": f"Failed to save: {e}"}})
         return templates.TemplateResponse(request, "settings/_device_form.html", {
             "row": row, **_TEMPLATE_CONTEXT,
         })
     latest_values_store.prune_to_urls(canonic_id, {ep["url"] for ep in endpoints})
 
-    row = await _row(canonic_id, saved=True)
+    # See the matching comment in save_device_yaml_route above - demo mode's
+    # set_device_config() call was a no-op, so echo back what was just typed
+    # instead of re-reading the fixed seed.
+    saved_overrides = {canonic_id: {"config": device_cfg, "error": None}} if demo_mode.is_demo_mode() else None
+    row = await settings_service.row(canonic_id, overrides=saved_overrides, saved=True)
     return templates.TemplateResponse(request, "settings/_device_form.html", {
         "row": row, **_TEMPLATE_CONTEXT,
     })
