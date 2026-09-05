@@ -338,9 +338,9 @@ def test_footer_has_no_demo_flag_for_onboarding_placeholder(client, monkeypatch)
 
 
 def test_login_start_still_live_for_onboarding_placeholder(client, monkeypatch):
+    import webui.browser_provisioning as browser_provisioning
     from webui import demo_mode
     from webui.routers import devices
-    import webui.browser_provisioning as browser_provisioning
 
     monkeypatch.setattr(devices, "is_logged_in", lambda: False)
     monkeypatch.setattr(demo_mode, "is_logged_in", lambda: False)
