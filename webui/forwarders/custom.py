@@ -8,9 +8,16 @@ import time
 
 import httpx
 
+from webui import demo_mode
+
 logger = logging.getLogger("webui.forwarders.custom")
 
 TIMEOUT_S = 10
+# A destination's error page/body can be arbitrarily large (an HTML error
+# page from a misconfigured reverse proxy, say) - bounded here so one bad
+# response can't blow up the forwarding log file (see log_store.py's own
+# FORWARD_LOG_MAX_ENTRIES cap for the same concern applied to entry count).
+MAX_LOGGED_RESPONSE_CHARS = 2000
 _TOKEN_RE = re.compile(r"\{\{(\w+)\}\}")
 
 
@@ -43,8 +50,17 @@ def _render(template: str, ctx: dict) -> str:
     return _TOKEN_RE.sub(repl, template)
 
 
+# The device_meta fields with a dedicated, hand-picked template name - see
+# the device_meta paragraph in build_context's docstring below. Anything
+# else present in device_meta gets a generic "label_<key>" name instead,
+# so a field added to get_device_details later needs no change here to
+# become available as a variable.
+_NAMED_DEVICE_META_KEYS = ("manufacturer", "model", "type", "type_id", "image_url")
+
+
 def build_context(
     endpoint_cfg: dict, location: dict, device_name: str, device_alias: str | None = None,
+    tracker_id: str = "", device_meta: dict | None = None,
 ) -> dict:
     """Every {{variable}} available to this endpoint's templates - the
     location fix, this endpoint's own alias, and (for endpoints saved before
@@ -58,12 +74,49 @@ def build_context(
     tests) still get sensible identical values for both, same as before
     device_alias existed as its own concept. Neither is overridable per
     endpoint - see webui/scheduler.py for where the two are actually told
-    apart (device_cfg's "google_name" vs "display_name")."""
+    apart (device_cfg's "google_name" vs "display_name").
+
+    tracker_id is this app's own internal id for the tracker (its
+    canonic_id) - see BUILTIN_VARIABLES_FROM_APP in presets.py, which has
+    offered it as a chip since that variable existed but, until now, this
+    function never actually set it.
+
+    device_meta is the rest of what ProtoDecoders.decoder.get_device_details
+    knows about the device (manufacturer, model, its category, a product
+    photo URL, and phone-only hardware/sharing info), synced into
+    forwarding.yaml by webui/routers/settings.py's _rows() the same way
+    google_name already is - see that function's own comment for why this
+    can't just be fetched fresh here instead. _NAMED_DEVICE_META_KEYS above
+    get their own {{name}}; everything else in the dict becomes
+    {{label_<key>}}, generically - see the loop below."""
     ctx = {
         "latitude": location.get("latitude"),
         "longitude": location.get("longitude"),
         "altitude_m": location.get("altitude"),
         "accuracy_m": location.get("accuracy"),
+        # status is Google's own fix-quality flag (see Common.proto's Status
+        # enum) as the string name decrypt_locations.py already names it -
+        # LAST_KNOWN/CROWDSOURCED/AGGREGATED for a real fix, or SEMANTIC for
+        # a named-location reading with a configured mapping (see
+        # webui/forwarders/semantic_map.py - forward_to_custom still bails
+        # out on any semantic reading with no mapped coordinates). own_report
+        # tells apart this tracker's own GPS fix from one crowdsourced by a
+        # nearby device.
+        "status": location.get("status") or "",
+        # status_id is the same flag as status above, but as the raw numeric
+        # enum value (see Common.proto's Status: LAST_KNOWN=1, CROWDSOURCED=2,
+        # AGGREGATED=3) for endpoints that want to key off it without string
+        # matching.
+        "status_id": location.get("status_id") if location.get("status_id") is not None else "",
+        # is_semantic/semantic_name are a plain-boolean and a human-readable
+        # alternative to checking status/status_id above for a SEMANTIC
+        # reading - decrypt_locations.py already computes both on the
+        # decoded location dict, this just carries them through. semantic_name
+        # is the named place Google reported (e.g. "Nest Mini - Living
+        # Room"), blank on a non-semantic fix.
+        "is_semantic": bool(location.get("is_semantic")),
+        "semantic_name": location.get("semantic_name") or "",
+        "own_report": bool(location.get("is_own_report")),
         # google_timestamp: when Google recorded this fix. current_timestamp:
         # right now, at send time - always fresh even when Google keeps
         # re-serving the same cached fix (see skip_if_stale in policy.py,
@@ -80,7 +133,17 @@ def build_context(
         "device_name": device_name or "",
         "device_alias": (device_alias if device_alias is not None else device_name) or "",
         "endpoint_alias": endpoint_cfg.get("alias") or "",
+        "tracker_id": tracker_id or "",
     }
+    meta = device_meta or {}
+    for key in _NAMED_DEVICE_META_KEYS:
+        # "is not None", not "or \"\"" - type_id can legitimately be 0
+        # (DEVICE_TYPE_UNKNOWN), which "or" would wrongly blank out.
+        value = meta.get(key)
+        ctx[key] = value if value is not None else ""
+    for key, value in meta.items():
+        if key not in _NAMED_DEVICE_META_KEYS:
+            ctx[f"label_{key}"] = value if value is not None else ""
     # No UI writes "variables" anymore (see webui/forwarders/presets.py's
     # module docstring) - this merge only still matters for an endpoint
     # saved before that change, so its {{device_id}}-style tokens keep
@@ -91,15 +154,40 @@ def build_context(
 
 def forward_to_custom(
     endpoint_cfg: dict, location: dict, device_name: str = "", device_alias: str | None = None,
+    tracker_id: str = "", device_meta: dict | None = None, response_out: dict | None = None,
 ) -> bool:
-    if location.get("is_semantic") or location.get("latitude") is None:
+    """response_out, if given, is filled in with whatever the destination
+    actually answered ("status_code"/"body", body truncated to
+    MAX_LOGGED_RESPONSE_CHARS) - the return value only ever says whether the
+    request was *sent* (raise_for_status() turns a non-2xx into the caller's
+    "error: ..." status), which isn't enough to debug a destination that
+    itself answers 200 while silently rejecting the point (see the Forwarding
+    Log's "Response" column, webui/forwarders/log_store.py). Left None by
+    every caller that doesn't care (most existing tests included) - the
+    request/response handling itself is unchanged either way."""
+    if location.get("latitude") is None:
+        # Covers both a real fix that somehow has no coordinates and a
+        # SEMANTIC reading with no configured mapping (see
+        # webui/forwarders/semantic_map.py) - either way there's nothing to
+        # send. A semantic reading that *does* have a mapped latitude falls
+        # through and sends normally, is_semantic and all.
         return False
 
     url_template = (endpoint_cfg.get("url") or "").strip()
     if not url_template:
         return False
 
-    ctx = build_context(endpoint_cfg, location, device_name, device_alias)
+    if demo_mode.is_demo_mode():
+        # Simulated success, no matter what a visitor typed into this
+        # endpoint's URL/headers/body - see webui/demo_mode.py. This is the
+        # one real send call site for both the cron loop (which never runs
+        # in demo mode anyway - see webui/main.py's lifespan) and the
+        # "Send now" button, so one check here covers both; also
+        # independently backstopped by webui/demo_network_guard.py in case
+        # this is ever bypassed.
+        return True
+
+    ctx = build_context(endpoint_cfg, location, device_name, device_alias, tracker_id, device_meta)
     # Query params live in the URL itself now (a literal "?key=value"), not
     # a separate table - _render() already substitutes {{var}} tokens
     # anywhere in this string, querystring included, so passing the
@@ -114,37 +202,46 @@ def forward_to_custom(
 
     body_type = endpoint_cfg.get("body_type") or "none"
     body_raw = endpoint_cfg.get("body") or ""
-    request_kwargs = {"headers": headers, "timeout": TIMEOUT_S}
+    content: str | None = None
+    data: dict[str, str] | None = None
 
     if body_type == "json" and body_raw.strip():
-        request_kwargs["content"] = _render(body_raw, ctx)
+        content = _render(body_raw, ctx)
         headers.setdefault("Content-Type", "application/json")
     elif body_type == "raw" and body_raw.strip():
-        request_kwargs["content"] = _render(body_raw, ctx)
+        content = _render(body_raw, ctx)
     elif body_type == "form" and body_raw.strip():
         # One "key=value" pair per line, same {{variable}} substitution as
         # everything else - kept as plain text rather than a key/value
         # table, since GET/POST-style key/value needs are already covered
         # by putting them straight in the URL's own querystring.
-        form_data = {}
+        data = {}
         for line in body_raw.splitlines():
             if "=" in line:
                 k, _, v = line.partition("=")
-                form_data[k.strip()] = _render(v.strip(), ctx)
-        request_kwargs["data"] = form_data
+                data[k.strip()] = _render(v.strip(), ctx)
 
-    response = httpx.request(method, url, **request_kwargs)
+    response = httpx.request(method, url, headers=headers, timeout=TIMEOUT_S, content=content, data=data)
+    if response_out is not None:
+        # Captured before raise_for_status() below - a non-2xx's body is
+        # exactly what's most worth seeing in the log, not just its status.
+        body = response.text
+        if len(body) > MAX_LOGGED_RESPONSE_CHARS:
+            body = body[:MAX_LOGGED_RESPONSE_CHARS] + "... (truncated)"
+        response_out["status_code"] = response.status_code
+        response_out["body"] = body
     response.raise_for_status()
     return True
 
 
 def preview_request(
     endpoint_cfg: dict, location: dict, device_name: str = "", device_alias: str | None = None,
+    tracker_id: str = "", device_meta: dict | None = None,
 ) -> dict:
     """Non-sending dry-run of the above, for the "Send now" confirmation /
     debugging - not currently wired into a route, kept alongside
     forward_to_custom so the two can't drift apart on how templating works."""
-    ctx = build_context(endpoint_cfg, location, device_name, device_alias)
+    ctx = build_context(endpoint_cfg, location, device_name, device_alias, tracker_id, device_meta)
     url = _render((endpoint_cfg.get("url") or "").strip(), ctx)
     headers = {k: _render(v, ctx) for k, v in (endpoint_cfg.get("headers") or {}).items()}
     body_type = endpoint_cfg.get("body_type") or "none"

@@ -65,6 +65,12 @@ to Google directly - it always goes through the CLI-tool layer.
 - `notify.py` - optional Apprise push notifications, also attached to the
   root logger, so any WARNING+ anywhere in the app (not just `webui.*`) can
   be pushed out live.
+- `staleness.py` - per-device staleness alerting: is the newest fix on file
+  for a device older than the threshold it's configured with, on its own
+  independent sweep (a device with no forwarding endpoints is never polled
+  by `scheduler.py` at all, so this can't piggyback on that loop). Config
+  and alert-dedup state live in `forwarders/latest_values_store.py`, not
+  here - see that module's own comment for why.
 - `geo.py` - the one pure-math helper (haversine distance), used by the
   scheduler's skip-if-close gate.
 - `ws.py` / `templating.py` - thin shared infrastructure: the WebSocket
@@ -76,9 +82,8 @@ to Google directly - it always goes through the CLI-tool layer.
 Everything about *where* a location goes, separate from *when* (that's
 `scheduler.py`'s job):
 
-- `config_store.py` - persisted per-device forwarding config
-  (`forwarding.yaml`): which endpoints, their schedules, thresholds, and
-  last-sent state.
+- `config_store.py` - persisted per-device forwarding config: which
+  endpoints, their schedules, thresholds.
 - `policy.py` - the skip-if-close/skip-if-stale gates, the dispatch-and-log
   call every endpoint goes through, and consecutive-failure escalation.
   Everything about *where* a location goes and whether this particular fix
@@ -91,26 +96,41 @@ Everything about *where* a location goes, separate from *when* (that's
   pre-fill the generic builder above, not separate code paths.
 - `log_store.py` - the Forwarding Log: every attempt, its target, status,
   and payload.
+- `latest_values_store.py` - per-endpoint-URL forwarding runtime state, plus
+  each device's staleness config/alert-dedup state - see
+  `webui/staleness.py`.
+
+`config_store.py`, `webui/device_location_store.py` (the Devices page's last
+known fix per device) and `latest_values_store.py` all persist through the
+shared `webui/device_store.py` - one file (`devices.yaml`), keyed by canonic
+device ID, one sub-key per module (`config`/`location`/`endpoint_state`/
+`staleness`), one lock. They used to be three independent YAML files; see
+that module's docstring for why they were fused and how the pre-fusion files
+get migrated in.
 
 ### `webui/routers/`
 
 One module per URL area, thin by design - they call into the modules above
 rather than holding logic themselves: `devices.py` (`/`), `locate.py`
 (manual locate), `sound.py` (play sound), `register.py` (pair a tracker),
-`settings.py` (forwarding config UI), `logs.py` (Forwarding Log + System
-Log pages), `auth.py` (sign in/out, the Config page), `vnc_proxy.py`
-(proxies the embedded browser view through the app's own origin instead of
-exposing noVNC directly), `metrics.py` (`/metrics` - Prometheus text,
-derived on each scrape from state the app already keeps, nothing new
-persisted).
+`settings.py` (forwarding config UI - the actual row-fetching/YAML-
+conversion/form-parsing logic lives in `webui/forwarders/settings_service.py`,
+keeping the router itself thin like every other one here),
+`staleness.py` (the Staleness page -
+per-device staleness alert config, separate from `settings.py`'s forwarding
+config), `logs.py` (Forwarding Log + System Log pages), `auth.py` (sign
+in/out, the Config page), `vnc_proxy.py` (proxies the embedded browser view
+through the app's own origin instead of exposing noVNC directly),
+`metrics.py` (`/metrics` - Prometheus text, derived on each scrape from
+state the app already keeps, nothing new persisted).
 
 ## Data on disk
 
 Everything persisted lives flat in one directory (`GFMT_DATA_DIR`, `/data`
 in the Docker image): `auth.yaml` (credentials, optionally encrypted - see
-`Auth/token_cache.py`), `forwarding.yaml`, `config.yaml`,
-`device_locations.yaml`, `forward.log`, `system.log`. No database - see the
-README's "Everything survives a restart" feature bullet for why.
+`Auth/token_cache.py`), `devices.yaml`, `config.yaml`, `forward.log`,
+`system.log`. No database - see the README's "Everything survives a
+restart" feature bullet for why.
 
 ## Tests
 

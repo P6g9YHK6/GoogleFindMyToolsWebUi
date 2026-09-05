@@ -24,7 +24,14 @@ from SpotApi.spot_request import spot_request
 logger = logging.getLogger(__name__)
 
 
-def register_esp32():
+def register_esp32(
+    display_name: str = "GoogleFindMyTools µC",
+    device_type: str = "DEVICE_TYPE_BEACON",
+    manufacturer_name: str = "GoogleFindMyTools",
+    model_name: str = "µC",
+    image_url: str = "https://docs.espressif.com/projects/esp-idf/en/v4.3/esp32/_images/esp32-DevKitM-1-isometric.png",
+    experimental_official_app_compat: bool = False,
+):
 
     owner_key = get_owner_key()
 
@@ -36,12 +43,12 @@ def register_esp32():
     register_request.fastPairModelId = mcu_fast_pair_model_id
 
     # Description
-    register_request.description.userDefinedName = "GoogleFindMyTools µC"
-    register_request.description.deviceType = SpotDeviceType.DEVICE_TYPE_BEACON
+    register_request.description.userDefinedName = display_name
+    register_request.description.deviceType = SpotDeviceType.Value(device_type)
 
     # Device Components Information
     component_information = DeviceComponentInformation()
-    component_information.imageUrl = "https://docs.espressif.com/projects/esp-idf/en/v4.3/esp32/_images/esp32-DevKitM-1-isometric.png"
+    component_information.imageUrl = image_url
     register_request.description.deviceComponentsInformation.append(component_information)
 
     # Capabilities
@@ -54,8 +61,22 @@ def register_esp32():
     register_request.e2eePublicKeyRegistration.pairingDate = pair_date
 
     # Encrypted User Secrets
-    # Flip bits so Android devices cannot decrypt the key
-    register_request.e2eePublicKeyRegistration.encryptedUserSecrets.encryptedIdentityKey = flip_bits(encrypt_aes_gcm(owner_key, eik), True)
+    # By default, flip bits so the official Find My Device app cannot decrypt
+    # this key - Google's client is deliberately handed an opaque blob it
+    # can't act on for a tracker this project alone manages. When
+    # experimental_official_app_compat is set, skip that corruption instead:
+    # encryptedIdentityKey is then encrypted under owner_key exactly like a
+    # real Android-registered device's would be, so the account's own owner
+    # key (see get_owner_key() above) can in principle decrypt it - whether
+    # the closed-source official app actually renders/locates it as a result
+    # is unverified, this only controls what's sent. Either way,
+    # SpotApi/identity_key.py's retrieve_identity_key() has to keep working,
+    # since fastPairModelId below is identical in both cases and can't tell
+    # them apart on its own.
+    encrypted_identity_key = encrypt_aes_gcm(owner_key, eik)
+    if not experimental_official_app_compat:
+        encrypted_identity_key = flip_bits(encrypted_identity_key, True)
+    register_request.e2eePublicKeyRegistration.encryptedUserSecrets.encryptedIdentityKey = encrypted_identity_key
 
     # Random keys, not used for ESP
     register_request.e2eePublicKeyRegistration.encryptedUserSecrets.encryptedAccountKey = secrets.token_bytes(44)
@@ -77,8 +98,8 @@ def register_esp32():
         time_counter += ROTATION_PERIOD
 
     # General
-    register_request.manufacturerName = "GoogleFindMyTools"
-    register_request.modelName = "µC"
+    register_request.manufacturerName = manufacturer_name
+    register_request.modelName = model_name
 
     ownerKeys = FMDNOwnerOperations()
     ownerKeys.generate_keys(identity_key=eik)

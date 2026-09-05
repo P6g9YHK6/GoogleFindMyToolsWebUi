@@ -13,7 +13,7 @@ from Auth import auth_flow
 from Auth.aas_token_retrieval import get_aas_token
 from Auth.token_cache import get_cached_value
 from KeyBackup.shared_key_retrieval import get_shared_key
-from webui import browser_stack, config
+from webui import browser_stack, config, demo_mode
 from webui.ws import provision_manager
 
 logger = logging.getLogger("webui.browser_provisioning")
@@ -32,6 +32,11 @@ def is_active() -> bool:
 
 
 async def start() -> dict:
+    if demo_mode.is_demo_mode():
+        # Defense-in-depth beyond webui/routers/auth.py's own guard - this
+        # function must never actually provision a real Chrome/Xvfb/noVNC
+        # stack on a public demo instance, regardless of what calls it.
+        return {"started": False, "state": get_state()}
     if _state["phase"] in _ACTIVE_PHASES:
         return {"started": False, "state": get_state()}
 

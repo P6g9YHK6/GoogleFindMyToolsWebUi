@@ -16,14 +16,22 @@ elsewhere, in any module.
 import logging
 import os
 import re
-import threading
+from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 
 import apprise
+
+from webui import demo_mode
 
 logger = logging.getLogger(__name__)
 
 _TARGET_LOGGER = ""  # root
 _DEFAULT_LEVEL = "WARNING"
+
+# A handful of reusable workers instead of one throwaway OS thread per log
+# record - a burst of WARNING+ lines (e.g. every device in a fleet failing to
+# forward at once) used to spawn one thread per line with no cap.
+_notify_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="apprise-notify")
 
 
 class _AppriseLogHandler(logging.Handler):
@@ -46,10 +54,10 @@ class _AppriseLogHandler(logging.Handler):
         except Exception:
             self.handleError(record)
             return
-        threading.Thread(target=self._apprise.notify, kwargs={"title": title, "body": body}, daemon=True).start()
+        _notify_executor.submit(self._apprise.notify, title=title, body=body)
 
 
-def configure_apprise_logging(env: dict | None = None) -> logging.Handler | None:
+def configure_apprise_logging(env: Mapping[str, str] | None = None) -> logging.Handler | None:
     """Wires up Apprise from APPRISE_URLS (comma/newline-separated) and
     APPRISE_NOTIFY_LEVEL (a standard logging level name, default WARNING -
     a plain config knob rather than a hardcoded idea of which failures
@@ -65,6 +73,15 @@ def configure_apprise_logging(env: dict | None = None) -> logging.Handler | None
     for existing in list(target_logger.handlers):
         if isinstance(existing, _AppriseLogHandler):
             target_logger.removeHandler(existing)
+
+    if demo_mode.is_demo_mode():
+        # Never installs a handler in demo mode, regardless of what a
+        # visitor typed into the App Settings form (see
+        # webui/routers/auth.py) - that save was never persisted anyway
+        # (see webui/settings_store.py), but this guards independently in
+        # case anything ever calls this with a real APPRISE_URLS env var
+        # still set on a demo deployment.
+        return None
 
     urls_raw = (env.get("APPRISE_URLS") or "").strip()
     if not urls_raw:

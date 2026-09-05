@@ -75,7 +75,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function popupLabel(name, loc, source) {
     const bits = [];
-    if (loc.is_own_report) bits.push("own report");
+    // A semantic reading with mapped coordinates (see
+    // webui/forwarders/semantic_map.py) still carries is_own_report=true
+    // (hardcoded at decode time, see decrypt_locations.py) - call out its
+    // actual semantic name instead, that's the meaningful thing here.
+    if (loc.is_semantic) bits.push(loc.semantic_name ? `mapped: ${loc.semantic_name}` : "semantic");
+    else if (loc.is_own_report) bits.push("own report");
     else if (loc.status) bits.push(loc.status.toLowerCase());
     if (source) bits.push(source);
     return bits.length ? `${name} (${bits.join(", ")})` : name;
@@ -119,7 +124,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const latlngs = [];
 
     (locations || []).forEach((loc, index) => {
-      if (loc.is_semantic || loc.latitude == null) return;
+      // A semantic reading with mapped coordinates (see
+      // webui/forwarders/semantic_map.py) gets a pin too now - gated on
+      // having a latitude at all, not on is_semantic.
+      if (loc.latitude == null) return;
       seenIndexes.add(index);
 
       const latlng = [loc.latitude, loc.longitude];
@@ -222,3 +230,114 @@ window.startNextPollCountdowns = function () {
   tick();
   _nextPollTimer = setInterval(tick, 1000);
 };
+
+// Staleness page: live "Xh Ym ago" under the "Last update" column (see
+// staleness/_table.html's data-last-fix-ts) - the inverse of the next-poll
+// countdown above, same one-shared-interval-per-page, re-armed-on-every-
+// htmx-reload approach. Also listens on the same /ws/locations channel the
+// map/devices page already uses (see connect() above) - a locate_result for
+// a device shown in this table bumps its row's last-fix timestamp and
+// re-derives fresh/stale client-side against the threshold already embedded
+// in that row's data attributes (see webui/staleness.py's compute_status,
+// which this intentionally mirrors in miniature - just enough to flip a
+// badge between "Fresh" and "Stale" without waiting for the next full
+// /staleness/table reload; the background sweep, not this, is what still
+// actually sends the alert).
+let _stalenessAgoTimer = null;
+
+function _formatElapsed(diffMs) {
+  if (diffMs <= 0) return "just now";
+  const totalSeconds = Math.floor(diffMs / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h ago`;
+  if (hours > 0) return `${hours}h ${minutes}m ago`;
+  if (minutes > 0) return `${minutes}m ago`;
+  return `${totalSeconds}s ago`;
+}
+
+window.startStalenessAgoTicker = function () {
+  if (_stalenessAgoTimer) clearInterval(_stalenessAgoTimer);
+
+  function tick() {
+    document.querySelectorAll("[data-last-fix-ts]").forEach((el) => {
+      const ts = Number(el.dataset.lastFixTs);
+      if (!ts) return;
+      el.textContent = _formatElapsed(Date.now() - ts * 1000);
+    });
+  }
+
+  tick();
+  _stalenessAgoTimer = setInterval(tick, 1000);
+};
+
+function _updateStalenessRow(canonicId, newestFixTs) {
+  const row = document.querySelector(`#staleness-table tr[data-canonic-id="${CSS.escape(canonicId)}"]`);
+  if (!row || !newestFixTs) return;
+
+  const agoEl = row.querySelector("[data-last-fix-ts]");
+  if (agoEl) agoEl.dataset.lastFixTs = String(newestFixTs);
+
+  const enabled = row.dataset.enabled === "1";
+  const muted = row.dataset.muted === "1";
+  const thresholdS = Number(row.dataset.thresholdS || 0);
+  if (!enabled || muted || !thresholdS) return; // status label for these cases doesn't depend on fix age
+
+  const ageS = Date.now() / 1000 - newestFixTs;
+  const statusCell = row.querySelector(".staleness-status");
+  if (!statusCell) return;
+  statusCell.innerHTML = ageS > thresholdS
+    ? '<span class="log-error">Stale</span>'
+    : '<span class="log-ok">Fresh</span>';
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  if (!document.getElementById("staleness-table")) return;
+
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+
+  function connectStalenessSocket() {
+    const socket = new WebSocket(`${proto}//${location.host}/ws/locations`);
+    socket.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type !== "locate_result") return;
+      const times = (msg.locations || [])
+        .filter((loc) => !loc.is_semantic && loc.time)
+        .map((loc) => loc.time);
+      if (times.length) _updateStalenessRow(msg.canonic_id, Math.max(...times));
+    };
+    socket.onclose = () => setTimeout(connectStalenessSocket, 3000);
+  }
+
+  connectStalenessSocket();
+});
+
+// Devices table photo -> full-size popup (see devices/_table.html's
+// .device-thumb-btn and devices/list.html's #device-image-modal) - also
+// deliberately not nested inside the #map-guarded block above, same reason
+// as the poll countdown just above: nothing to do with the map. Delegated
+// off `document` so it keeps working across the table's own htmx reloads
+// with no re-init step.
+document.addEventListener("click", (event) => {
+  const modal = document.getElementById("device-image-modal");
+  if (!modal) return;
+
+  const thumbBtn = event.target.closest(".device-thumb-btn");
+  if (thumbBtn) {
+    modal.querySelector(".image-modal-img").src = thumbBtn.dataset.imageUrl;
+    modal.querySelector(".image-modal-img").alt = thumbBtn.dataset.imageLabel || "";
+    modal.querySelector(".image-modal-caption").textContent = thumbBtn.dataset.imageLabel || "";
+    modal.showModal();
+    return;
+  }
+
+  // Closes on the x button, or on the dialog's own ::backdrop - a native
+  // <dialog>'s backdrop click bubbles with the dialog element itself as
+  // the target, which is what the equality check below actually detects
+  // (a click landing on the image or caption instead leaves event.target
+  // as that inner element, so it's excluded automatically).
+  if (event.target.closest(".image-modal-close") || event.target === modal) {
+    modal.close();
+  }
+});

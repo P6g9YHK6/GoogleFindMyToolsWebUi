@@ -2,8 +2,8 @@
 places that call locate_device() (webui/routers/locate.py's manual button
 and webui/scheduler.py's cron polling), so the Devices page can always show
 something instead of going blank on every page load until someone clicks
-Locate again. Same small-persisted-YAML shape as webui/settings_store.py;
-there's nothing to migrate from, so no legacy-JSON fallback here.
+Locate again. Backed by the shared devices.yaml - see webui/device_store.py -
+under this module's own "location" sub-key.
 
 Every stored location also carries a "first_seen" unix timestamp - see
 set_last_location - so webui/scheduler.py can tell a genuinely new reading
@@ -12,14 +12,8 @@ apart from Google re-serving one it already returned in an earlier fetch
 forwarding the latter again.
 """
 
-import threading
-
-import yaml
-
 from NovaApi.ExecuteAction.LocateTracker.decrypt_locations import create_map_links
-from webui import config
-
-_lock = threading.Lock()
+from webui import device_store
 
 
 def _migrate_location(loc: dict, fallback_first_seen: int | None) -> dict:
@@ -29,8 +23,8 @@ def _migrate_location(loc: dict, fallback_first_seen: int | None) -> dict:
     Backfill "map_links" from the coordinates already on file rather than
     leaving the Devices page's "Map" column permanently blank for every
     location fetched before that rename. Safe to run unconditionally on
-    every load, same as webui/forwarders/config_store.py's migrations - a
-    no-op once this device's next real locate overwrites the entry anyway.
+    every load - a no-op once this device's next real locate overwrites the
+    entry anyway.
 
     Also backfills "first_seen" (added after both of these) with the
     containing entry's own "fetched_at" - not exactly right (this reading
@@ -67,41 +61,31 @@ def most_recent_only(locations: list[dict]) -> list[dict]:
     forwarding's own per-endpoint only_most_recent toggle (see
     webui/forwarders/policy.py's _skip_not_most_recent), which decides
     what gets sent to an endpoint, not what gets shown on this page."""
-    times = [loc.get("time") for loc in locations if loc.get("time") is not None]
+    times: list[int] = [loc["time"] for loc in locations if loc.get("time") is not None]
     if not times:
         return locations
     newest = max(times)
     return [loc for loc in locations if loc.get("time") == newest]
 
 
-def _load_unlocked() -> dict:
-    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    if not config.DEVICE_LOCATIONS_PATH.exists():
-        return {}
-    try:
-        with open(config.DEVICE_LOCATIONS_PATH) as f:
-            data = yaml.safe_load(f)
-    except (yaml.YAMLError, OSError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _save_unlocked(data: dict):
-    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(config.DEVICE_LOCATIONS_PATH, "w") as f:
-        yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
-
-
 def get_last_location(canonic_id: str) -> dict | None:
     """{"locations": [...], "fetched_at": <unix ts>}, or None if nothing's
     ever been obtained for this device. Each location carries "first_seen" -
     see set_last_location."""
-    with _lock:
-        entry = _load_unlocked().get(canonic_id)
-        if not entry or "locations" not in entry:
-            return None
-        locations = [_migrate_location(loc, entry.get("fetched_at")) for loc in entry["locations"]]
-        return {"locations": locations, "fetched_at": entry.get("fetched_at")}
+    result = {}
+
+    def _read(entry: dict) -> None:
+        location = entry.get("location")
+        if not location or "locations" not in location:
+            return
+        migrated = [_migrate_location(loc, location.get("fetched_at")) for loc in location["locations"]]
+        if migrated != location["locations"]:
+            entry["location"] = {**location, "locations": migrated}
+        result["locations"] = migrated
+        result["fetched_at"] = location.get("fetched_at")
+
+    device_store.mutate_device(canonic_id, _read)
+    return result or None
 
 
 def set_last_location(canonic_id: str, locations: list[dict], fetched_at: int) -> list[dict]:
@@ -126,20 +110,18 @@ def set_last_location(canonic_id: str, locations: list[dict], fetched_at: int) -
 
     Returns the stamped locations list actually persisted (plus that one
     transient key)."""
-    with _lock:
-        data = _load_unlocked()
-        entry = data.setdefault(canonic_id, {})
-        # A location stored before "first_seen" existed has no such key on
-        # disk (entry.get("locations", []) is the raw, un-migrated data -
-        # get_last_location's _migrate_location backfill never runs here) -
+    out = {}
+
+    def _stamp(entry: dict) -> None:
+        location = entry.get("location") or {}
+        # A location stored before "first_seen" existed has no such key -
         # fall back to that prior snapshot's own fetched_at rather than
-        # letting a bare .get(...) hand back None and poison first_seen
-        # (and downstream skip-if-already-seen decisions) for that reading
-        # from here on.
-        prior_fetched_at = entry.get("fetched_at")
+        # letting a bare .get(...) hand back None and poison first_seen (and
+        # downstream skip-if-already-seen decisions) for that reading.
+        prior_fetched_at = location.get("fetched_at")
         previously_seen = {
             _location_key(loc): loc.get("first_seen", prior_fetched_at) or prior_fetched_at
-            for loc in entry.get("locations", [])
+            for loc in location.get("locations", [])
         }
 
         stamped = []
@@ -152,7 +134,8 @@ def set_last_location(canonic_id: str, locations: list[dict], fetched_at: int) -
             persisted.append({**loc, "first_seen": first_seen})
             stamped.append({**loc, "first_seen": first_seen, "_new_this_fetch": is_new})
 
-        entry["locations"] = persisted
-        entry["fetched_at"] = fetched_at
-        _save_unlocked(data)
-        return stamped
+        entry["location"] = {"locations": persisted, "fetched_at": fetched_at}
+        out["stamped"] = stamped
+
+    device_store.mutate_device(canonic_id, _stamp)
+    return out["stamped"]

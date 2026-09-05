@@ -51,11 +51,10 @@
   {% if is_new %}
     <p class="field-hint preset-hint">{{ (presets.get(endpoint.type) or presets.get('custom')).hint }}</p>
   {% endif %}
-  <p class="field-hint">Optional label for this endpoint block itself, e.g. "Home Traccar" - available as <code>{{ '{{endpoint_alias}}' }}</code> below. Separate from the device alias set at the top of this device's settings, which is <code>{{ '{{device_alias}}' }}</code>.</p>
 
   <div class="endpoint-sections">
   <fieldset class="preview-fieldset">
-    <legend>Preview <span class="field-hint" style="margin:0;">- using a sample fix, so you can see what actually goes out</span></legend>
+    <legend>Preview <span class="field-hint" style="margin:0;">- using this device's last known data where available, a sample fix otherwise</span></legend>
     <pre class="preview-block"></pre>
   </fieldset>
 
@@ -76,19 +75,26 @@
       </div>
       <div class="url-row-field">
         <label>URL
-          {# The backdrop mirrors the textarea's own text behind it, live -
-             endpoint_fields.js's updateUrlHighlight() renders it through
-             the same renderTemplate() the Preview block below uses, so a
-             {{var}} token gets the identical green/amber resolved/
-             unresolved tint here, right where you're typing it. #}
-          <div class="url-highlight">
-            <div class="url-highlight-backdrop" aria-hidden="true"></div>
-            <textarea name="ep-{{ idx }}-url" class="url-input url-autosize templatable" rows="1">{{ endpoint.url or '' }}</textarea>
+          {# A contenteditable div, not a textarea - a textarea can only
+             render its whole value in one uniform color, and coloring a
+             {{var}} token green/amber (resolved/unresolved) plus the
+             scheme and host needs per-substring color. endpoint_fields.js
+             re-renders this element's own content through
+             renderUrlTemplate() (same renderTemplate() the Preview block
+             above uses, plus scheme/host spans) on every edit, preserving
+             the caret across the redraw - so what's on screen is always
+             exactly what you typed, just colored, never a stand-in for it.
+             The div itself carries no name (contenteditable fields aren't
+             form-associated, so it wouldn't submit anyway) - the hidden
+             input below it is kept in sync and is what actually saves. #}
+          <div class="url-field-wrap">
+            <div class="url-input url-autosize templatable" contenteditable="true" spellcheck="false"
+                 autocapitalize="off" autocorrect="off" role="textbox" aria-multiline="true">{{ endpoint.url or '' }}</div>
+            <input type="hidden" name="ep-{{ idx }}-url" class="url-input-value" value="{{ endpoint.url or '' }}">
           </div>
         </label>
       </div>
     </div>
-    <p class="field-hint">Query params go directly in the URL - e.g. <code>?lat={{ '{{latitude}}' }}&amp;lon={{ '{{longitude}}' }}</code></p>
 
     <div class="kv-section">
       <div class="kv-head"><h3>Headers</h3><button type="button" class="btn-add" data-target="header">+ Add row</button></div>
@@ -165,10 +171,25 @@
 
   <div class="endpoint-col-right">
   <fieldset>
-    <legend>Variables</legend>
-    <p class="field-hint">Click a chip to insert it into whichever field you were last editing (hover a chip for what it means). Location and device values come from the fix being forwarded.</p>
+    <legend>From the location fix</legend>
+    <p class="field-hint">Click a chip to insert it into whichever field you were last editing (hover a chip for what it means).</p>
     <div class="chip-row">
-      {% for name, description in builtin_variables %}
+      {# The label_* chips (carrier/imei/etc) aren't in builtin_variables_from_fix
+         - they're phone-only fields, so unconditionally offering all five
+         regardless of device would just be five tokens that resolve to blank
+         on a non-phone tracker. row.label_variables (see webui/routers/
+         settings.py's device_label_variables) only offers the ones this
+         device actually has a real value for. #}
+      {% for name, description in builtin_variables_from_fix + (row.label_variables if row is defined else []) %}
+        <button type="button" class="chip" data-var="{{ name }}" title="{{ description }}">{{ '{{' }}{{ name }}{{ '}}' }}</button>
+      {% endfor %}
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>From this app</legend>
+    <div class="chip-row">
+      {% for name, description in builtin_variables_from_app %}
         <button type="button" class="chip" data-var="{{ name }}" title="{{ description }}">{{ '{{' }}{{ name }}{{ '}}' }}</button>
       {% endfor %}
     </div>
@@ -193,14 +214,65 @@
       <label class="checkbox-label">
         <input type="checkbox" class="skip-toggle" data-controls="stale" {% if endpoint.skip_if_stale %}checked{% endif %}>
         <input type="hidden" name="ep-{{ idx }}-skip_if_stale" value="{{ '1' if endpoint.skip_if_stale else '0' }}">
-        Skip re-sending Google's same last-known fix
+        Skip stale fixes too close in time to the last one sent
       </label>
       <div class="toggle-controlled" {% if not endpoint.skip_if_stale %}hidden{% endif %}>
-        <label>Minimum time between re-sends of an unchanged fix (minutes)
+        <label>Minimum gap from the last sent fix's timestamp (minutes)
           <input type="number" name="ep-{{ idx }}-min_update_gap_m" min="1" step="1" value="{{ endpoint.min_update_gap_m or 30 }}">
         </label>
-        <p class="field-hint">This is based on the fix timestamp <strong>Google's backend</strong> reports for this tracker, not on when this endpoint last sent something. Google can keep returning the exact same cached fix for a while; this only delays re-sending that identical stale fix by the time set here. The moment Google reports an actually newer fix, it's sent immediately regardless of this timer.</p>
+        <p class="field-hint">Based on the fix timestamp <strong>Google's backend</strong> reports, not on when this endpoint last sent something. A fix reported within the last 2 minutes always sends immediately, live or not. Otherwise, a stale fix is skipped unless its timestamp is at least this many minutes away (earlier or later) from the last fix's timestamp actually sent - it's a spacing rule between stale timestamps, not a check for whether it's literally the same fix as before.</p>
       </div>
+    </div>
+
+    <div class="toggle-group">
+      <label class="checkbox-label">
+        <input type="checkbox" class="skip-toggle" data-controls="accuracy" {% if endpoint.skip_if_inaccurate %}checked{% endif %}>
+        <input type="hidden" name="ep-{{ idx }}-skip_if_inaccurate" value="{{ '1' if endpoint.skip_if_inaccurate else '0' }}">
+        Skip sending if accuracy is worse than
+      </label>
+      <div class="toggle-controlled" {% if not endpoint.skip_if_inaccurate %}hidden{% endif %}>
+        <label>Maximum accuracy radius to send (meters)
+          <input type="number" name="ep-{{ idx }}-max_accuracy_m" min="1" step="1" value="{{ endpoint.max_accuracy_m or 100 }}">
+        </label>
+        <p class="field-hint">Google's own <code>accuracy_m</code> radius of uncertainty for the fix - independent of the status filter above, since a fix can carry a "good" status but still have a wide radius, or vice versa.</p>
+      </div>
+    </div>
+
+    <div class="toggle-group">
+      {# filter_by_status defaults off, same convention as skip_if_close/
+         skip_if_inaccurate above - the per-type checkboxes below stay out
+         of the way until this is turned on. Each of those defaults to
+         checked/allowed once visible; only the ones the owner actively
+         unchecked end up in endpoint.blocked_statuses. See policy.py's
+         _skip_blocked_status and this form's parsing in settings.py.
+         The inner checkboxes are "status-choice-toggle", not "skip-toggle"
+         - they share this group with the master checkbox above, and
+         applyToggleVisibility (endpoint_fields.js) would otherwise treat
+         each of them as its own group's visibility switch too. #}
+      <label class="checkbox-label">
+        <input type="checkbox" class="skip-toggle" {% if endpoint.filter_by_status %}checked{% endif %}>
+        <input type="hidden" name="ep-{{ idx }}-filter_by_status" value="{{ '1' if endpoint.filter_by_status else '0' }}">
+        Filter by report type
+      </label>
+      <div class="toggle-controlled" {% if not endpoint.filter_by_status %}hidden{% endif %}>
+        <p class="field-hint">Allow these fix types (unchecking one skips fixes Google flags with that status):</p>
+        {% for code, label in status_choices %}
+        <label class="checkbox-label">
+          <input type="checkbox" class="status-choice-toggle" {% if code not in (endpoint.blocked_statuses or []) %}checked{% endif %}>
+          <input type="hidden" name="ep-{{ idx }}-status_{{ code }}" value="{{ '0' if code in (endpoint.blocked_statuses or []) else '1' }}">
+          {{ label }} ({{ code }})
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="toggle-group">
+      <label class="checkbox-label">
+        <input type="checkbox" class="skip-toggle" {% if endpoint.skip_if_not_own_report %}checked{% endif %}>
+        <input type="hidden" name="ep-{{ idx }}-skip_if_not_own_report" value="{{ '1' if endpoint.skip_if_not_own_report else '0' }}">
+        Only send this tracker's own GPS reports
+      </label>
+      <p class="field-hint">Off by default: Google can also report crowdsourced fixes from other nearby devices seeing this tracker. Turn this on to only forward the tracker's own reports.</p>
     </div>
 
     <div class="toggle-group">

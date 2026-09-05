@@ -18,6 +18,14 @@ GFMT_BROWSER_IDLE_TIMEOUT_S = int(os.environ.get("GFMT_BROWSER_IDLE_TIMEOUT_S", 
 # hangs the whole sign-in flow forever with no error, since urlretrieve has no
 # timeout of its own.
 GFMT_BROWSER_DOWNLOAD_TIMEOUT_S = int(os.environ.get("GFMT_BROWSER_DOWNLOAD_TIMEOUT_S", "300"))
+# Bounds how long apt-get update/install and dpkg --configure -a
+# (webui/browser_stack.py's install_x_stack) can go with zero new output
+# before being treated as stuck and killed - not how long the whole thing is
+# allowed to take. ~19 packages plus transitive deps can legitimately run
+# well past any single fixed deadline on a slow disk or mirror as long as
+# it's still producing "Unpacking"/"Setting up" lines; this only fires if it
+# goes fully quiet (a dead mirror, a stuck dpkg lock) for this long.
+GFMT_BROWSER_APT_IDLE_TIMEOUT_S = int(os.environ.get("GFMT_BROWSER_APT_IDLE_TIMEOUT_S", "300"))
 DEFAULT_POLL_INTERVAL_S = int(os.environ.get("DEFAULT_POLL_INTERVAL_S", "300"))
 # How long a device-list fetch (Nova's slow device-list call, see
 # NovaApi/ListDevices/nbe_list_devices.py's request_device_list()) is reused
@@ -53,6 +61,13 @@ HTTP_PASSWORD = os.environ.get("HTTP_PASSWORD")
 # HTTPS_ENABLED=0 can't accidentally enable it. Unset by default - see
 # README.
 HTTPS_ENABLED = os.environ.get("HTTPS_ENABLED") == "1"
+
+# Public-showcase demo mode - see webui/demo_mode.py, webui/demo_data.py and
+# the README's "Demo mode" section. Every page shows a fixed fake dataset,
+# real Google login and every outbound network call are disabled, and no
+# visitor write is ever persisted to disk. Same exact "1" convention as
+# HTTPS_ENABLED above. Unset by default.
+DEMO_MODE = os.environ.get("DEMO_MODE") == "1"
 # Bring-your-own-cert escape hatch - if either is set, webui/tls.py requires
 # both files to actually exist (fails loudly rather than silently falling
 # back to a self-signed cert the operator didn't ask for). Unset means
@@ -75,8 +90,15 @@ GFMT_TLS_VALIDITY_DAYS = int(os.environ.get("GFMT_TLS_VALIDITY_DAYS", "825"))
 # alongside GFMT_SECRETS_DIR under the same volume) instead of always sitting
 # next to this module - see Auth/token_cache.py for the same pattern.
 DATA_DIR = pathlib.Path(os.environ.get("GFMT_DATA_DIR") or (pathlib.Path(__file__).parent / "data"))
+
+# One file, keyed by canonic device ID, backing config_store.py,
+# device_location_store.py and latest_values_store.py - see
+# webui/device_store.py. FORWARDING_CONFIG_PATH/DEVICE_LOCATIONS_PATH/
+# LATEST_VALUES_PATH/their legacy JSON below are the pre-fusion locations -
+# device_store.py reads them once to migrate into DEVICES_PATH, then never
+# again.
+DEVICES_PATH = DATA_DIR / "devices.yaml"
 FORWARDING_CONFIG_PATH = DATA_DIR / "forwarding.yaml"
-# Pre-YAML location - config_store.py reads this once to migrate, then never again.
 FORWARDING_CONFIG_LEGACY_JSON_PATH = DATA_DIR / "forwarding_config.json"
 FORWARD_LOG_PATH = DATA_DIR / "forward.log"
 # Pre-.log location - log_store.py reads this once to migrate, then never again.
@@ -93,16 +115,34 @@ APP_SETTINGS_PATH = DATA_DIR / "config.yaml"
 SYSTEM_LOG_PATH = DATA_DIR / "system.log"
 SYSTEM_LOG_MAX_ENTRIES = int(os.environ.get("SYSTEM_LOG_MAX_ENTRIES", "5000"))
 
-# The last location actually obtained for each device, regardless of whether
-# it came from a manual Locate click or a scheduled poll - see
-# webui/device_location_store.py and the Devices page.
+# Pre-fusion location for device_location_store.py's data - see DEVICES_PATH.
 DEVICE_LOCATIONS_PATH = DATA_DIR / "device_locations.yaml"
 
-# Per-endpoint forwarding runtime state (last status/time, last-sent
-# position, consecutive-failure streak) - kept out of forwarding.yaml so
-# that file stays pure configuration instead of growing a pile of history -
-# see webui/forwarders/latest_values_store.py.
+# Pre-fusion location for latest_values_store.py's data - see DEVICES_PATH.
 LATEST_VALUES_PATH = DATA_DIR / "latest_values.yaml"
+
+# Every advertisement key ever produced by /register, so the Firmware page
+# can offer them again later instead of making the user copy-paste one it
+# only ever showed once - see webui/firmware_store.py. Safe to persist: it's
+# the public EID, not the private eik (see SpotApi/CreateBleDevice/create_ble_device.py,
+# which never returns eik at all).
+REGISTERED_TRACKERS_PATH = DATA_DIR / "registered_trackers.yaml"
+
+# Bounds a single `idf.py build` invocation kicked off from the Firmware page
+# - see webui/firmware_build.py. Generous: a cold ESP-IDF build can take
+# several minutes.
+GFMT_FIRMWARE_BUILD_TIMEOUT_S = int(os.environ.get("GFMT_FIRMWARE_BUILD_TIMEOUT_S", "900"))
+
+# Where the on-demand ESP-IDF toolchain (source clone + installed toolchains)
+# lives - under DATA_DIR, the volume mount, since re-fetching ~1-2GB on every
+# container restart would be far too slow to redo per-attempt. See
+# webui/esp_idf_provisioning.py.
+GFMT_ESP_IDF_DIR = DATA_DIR / "esp-idf"
+GFMT_ESP_IDF_TOOLS_DIR = DATA_DIR / "esp-idf-tools"
+# Bounds the initial ESP-IDF clone + toolchain install (webui/esp_idf_provisioning.py) -
+# generous, since a cold clone/install over a slow connection can take several
+# minutes; only paid once per container's DATA_DIR, not on every build.
+GFMT_ESP_IDF_PROVISION_TIMEOUT_S = int(os.environ.get("GFMT_ESP_IDF_PROVISION_TIMEOUT_S", "1800"))
 
 # Default location for a generated self-signed cert/key (see webui/tls.py) -
 # flat in DATA_DIR like everything else here, so the existing volume mount
@@ -118,7 +158,16 @@ TLS_KEY_PATH = DATA_DIR / "tls_key.pem"
 # webui/templating.py, which treats that as "no real commit to link to".
 GFMT_BUILD_SHA = os.environ.get("GFMT_BUILD_SHA", "dev")
 GFMT_BUILD_DATE = os.environ.get("GFMT_BUILD_DATE", "")
+GFMT_BUILD_BRANCH = os.environ.get("GFMT_BUILD_BRANCH", "")
 
 # Process start time, for the footer's uptime display and /metrics'
 # gfmt_uptime_seconds (webui/routers/metrics.py) - one clock, two consumers.
 APP_START_TIME = time.monotonic()
+
+# Low-level, process-wide backstop for DEMO_MODE - see
+# webui/demo_network_guard.py's module docstring for why this lives here
+# (imported before virtually everything else) rather than in webui/main.py's
+# lifespan. A no-op when DEMO_MODE is unset.
+from webui import demo_network_guard  # noqa: E402
+
+demo_network_guard.install(DEMO_MODE)

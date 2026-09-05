@@ -15,8 +15,33 @@ from webui.geo import haversine_distance_m
 
 logger = logging.getLogger("webui.forwarders.policy")
 
+# The subset of this module's underscore-prefixed functions webui/scheduler.py
+# imports directly - still "private" to callers outside this package, but a
+# deliberate, tested seam between "how to forward" (here) and "when" (there).
+# Keep this list in sync with scheduler.py's import block.
+__all__ = [
+    "_dispatch_forward",
+    "_endpoint_target",
+    "_format_response_for_log",
+    "_forward_one",
+    "_record_forward_result",
+    "_serialize_location",
+]
+
 DEFAULT_MIN_MOVEMENT_M = 50
 DEFAULT_MIN_UPDATE_GAP_M = 30
+DEFAULT_MAX_ACCURACY_M = 100
+# The statuses a location can carry (see Common.proto's Status enum) - the
+# three real fix-quality values plus SEMANTIC, a named-location reading
+# rather than a GPS/WiFi/cellular fix (see webui/forwarders/semantic_map.py).
+# Order matches roughly-best-to-worst, for the settings UI's checkbox list,
+# with SEMANTIC last since it isn't a quality tier at all.
+STATUS_CHOICES: list[tuple[str, str]] = [
+    ("LAST_KNOWN", "GPS"),
+    ("CROWDSOURCED", "WiFi/Cellular"),
+    ("AGGREGATED", "Coarse/low-accuracy"),
+    ("SEMANTIC", "Named location"),
+]
 # A fix this recent is treated as a genuinely live update rather than Google
 # re-serving the same stale cached report - always sent regardless of the
 # stale-duplicate gate below.
@@ -62,10 +87,14 @@ def _too_close_to_bother(endpoint_cfg: dict, location: dict) -> bool:
     """True if this endpoint's "skip if it hasn't moved" toggle is on and the
     new fix is under its configured minimum-movement threshold from the last
     position actually sent - see webui/geo.py for the (local, API-free)
-    distance calculation."""
+    distance calculation. Applies the same way to a SEMANTIC reading with
+    mapped coordinates (see webui/forwarders/semantic_map.py) as to a real
+    fix - once it has a latitude, "hasn't moved" means the same thing either
+    way. An unmapped semantic reading still has no latitude and skips this
+    gate entirely, same as before."""
     if not endpoint_cfg.get("skip_if_close"):
         return False
-    if location.get("is_semantic") or location.get("latitude") is None:
+    if location.get("latitude") is None:
         return False
     last_lat, last_lon = endpoint_cfg.get("last_sent_lat"), endpoint_cfg.get("last_sent_lon")
     if last_lat is None or last_lon is None:
@@ -80,10 +109,17 @@ def _stale_duplicate(endpoint_cfg: dict, location: dict, now: float | None = Non
     minimum-update-gap of the last fix's own timestamp actually sent - i.e.
     Google is just re-serving the same stale cached report again, not a new
     update. A genuinely live fix (recorded within FRESH_FIX_AGE_S of now)
-    always bypasses this and gets sent regardless."""
+    always bypasses this and gets sent regardless. Applies the same way to a
+    SEMANTIC reading with mapped coordinates (see
+    webui/forwarders/semantic_map.py) as to a real fix. An unmapped semantic
+    reading (is_semantic, no latitude) skips this gate entirely, same as
+    before - checked via latitude rather than is_semantic alone so a mapped
+    one isn't accidentally caught by the same exemption."""
     if not endpoint_cfg.get("skip_if_stale"):
         return False
-    if location.get("is_semantic") or location.get("time") is None:
+    if location.get("is_semantic") and location.get("latitude") is None:
+        return False
+    if location.get("time") is None:
         return False
     now = time.time() if now is None else now
     if now - location["time"] <= FRESH_FIX_AGE_S:
@@ -95,17 +131,69 @@ def _stale_duplicate(endpoint_cfg: dict, location: dict, now: float | None = Non
     return abs(location["time"] - last_fix_time) < gap_s
 
 
+def _skip_blocked_status(endpoint_cfg: dict, location: dict) -> bool:
+    """True if this endpoint has "filter by report type" turned on and this
+    reading's status is one of the fix types unchecked there. filter_by_status
+    off (the default) means the per-type checkboxes are hidden in the
+    settings UI and never consulted, regardless of what blocked_statuses
+    holds - same absence-means-off convention as skip_if_close/skip_if_stale
+    above. A semantic reading's status is always "SEMANTIC" (see
+    decrypt_locations.py) - checked against blocked_statuses the same
+    uniform way as the three real fix-quality values (see STATUS_CHOICES),
+    so unchecking "Named location" there blocks it like any other type."""
+    if not endpoint_cfg.get("filter_by_status"):
+        return False
+    return location.get("status") in (endpoint_cfg.get("blocked_statuses") or [])
+
+
+def _skip_not_own_report(endpoint_cfg: dict, location: dict) -> bool:
+    """True if this endpoint's "only send this tracker's own GPS reports"
+    toggle is on and this fix is crowdsourced from a nearby device instead
+    of the tracker's own (see own_report in webui/forwarders/custom.py's
+    build_context). Always bypassed for a semantic reading, mapped
+    coordinates or not - is_own_report is hardcoded True at decode time for
+    every SEMANTIC result (see decrypt_locations.py), so it's never a real
+    signal to filter on."""
+    if not endpoint_cfg.get("skip_if_not_own_report"):
+        return False
+    if location.get("is_semantic"):
+        return False
+    return not location.get("is_own_report")
+
+
+def _skip_inaccurate(endpoint_cfg: dict, location: dict) -> bool:
+    """True if this endpoint's "skip if accuracy is worse than" toggle is on
+    and Google's own accuracy_m radius for this fix exceeds the configured
+    threshold - a wider radius means a less precise fix, independent of
+    what status flag it carries (status and accuracy_m are correlated but
+    not the same signal - this gate lets accuracy be filtered on directly,
+    same shape as _too_close_to_bother's min_movement_m above). Always
+    bypassed for a semantic reading, mapped coordinates or not -
+    accuracy is hardcoded 0 at decode time for every SEMANTIC result (see
+    decrypt_locations.py), so it's never a real signal to filter on."""
+    if not endpoint_cfg.get("skip_if_inaccurate"):
+        return False
+    if location.get("is_semantic") or location.get("accuracy") is None:
+        return False
+    threshold = endpoint_cfg.get("max_accuracy_m") or DEFAULT_MAX_ACCURACY_M
+    return location["accuracy"] > threshold
+
+
 def _dispatch_forward(
     endpoint_cfg: dict, location: dict, device_name: str = "", device_alias: str | None = None,
+    tracker_id: str = "", device_meta: dict | None = None, response_out: dict | None = None,
 ) -> str:
     """Sends this endpoint's request, with no distance-skip check - used both
     by the normal scheduled path (after it passes _too_close_to_bother) and
     by the "send now" button, which is meant to bypass that check entirely.
     Every endpoint goes through the same generic templated request (see
     webui/forwarders/custom.py); Traccar/PhoneTrack are presets that pre-fill
-    it, not separate code paths - see webui/forwarders/presets.py."""
+    it, not separate code paths - see webui/forwarders/presets.py.
+
+    response_out is just threaded straight through to forward_to_custom - see
+    its own docstring."""
     try:
-        ok = forward_to_custom(endpoint_cfg, location, device_name, device_alias)
+        ok = forward_to_custom(endpoint_cfg, location, device_name, device_alias, tracker_id, device_meta, response_out)
         return "ok" if ok else "skipped"
     except Exception as e:
         logger.warning("Forwarding failed: %s", e)
@@ -114,7 +202,8 @@ def _dispatch_forward(
 
 def _forward_one(
     endpoint_cfg: dict, location: dict, device_name: str = "", device_alias: str | None = None,
-    already_seen: bool = False, is_most_recent: bool = True,
+    tracker_id: str = "", device_meta: dict | None = None,
+    already_seen: bool = False, is_most_recent: bool = True, response_out: dict | None = None,
 ) -> str:
     """already_seen is True when this exact reading (see
     device_location_store._location_key) was already present in an earlier
@@ -135,7 +224,14 @@ def _forward_one(
     if _stale_duplicate(endpoint_cfg, location):
         gap = endpoint_cfg.get("min_update_gap_m") or DEFAULT_MIN_UPDATE_GAP_M
         return f"skipped: not updated in the last {gap:g}m"
-    return _dispatch_forward(endpoint_cfg, location, device_name, device_alias)
+    if _skip_blocked_status(endpoint_cfg, location):
+        return f"skipped: fix type {location.get('status')} is unchecked in this endpoint's filter"
+    if _skip_not_own_report(endpoint_cfg, location):
+        return "skipped: not this tracker's own report (crowdsourced by another device)"
+    if _skip_inaccurate(endpoint_cfg, location):
+        threshold = endpoint_cfg.get("max_accuracy_m") or DEFAULT_MAX_ACCURACY_M
+        return f"skipped: accuracy radius over {threshold:g}m"
+    return _dispatch_forward(endpoint_cfg, location, device_name, device_alias, tracker_id, device_meta, response_out)
 
 
 def _serialize_location(location: dict) -> str:
@@ -146,6 +242,18 @@ def _serialize_location(location: dict) -> str:
         return json.dumps(location, default=str)
     except TypeError:
         return str(location)
+
+
+def _format_response_for_log(response_out: dict) -> str:
+    """response_out (see _dispatch_forward/forward_to_custom) as one string
+    for the Forwarding Log's Response column - blank when nothing was ever
+    received (a skip, or a connection-level failure with no response body
+    at all). A destination answering 200 while silently rejecting the point
+    (PhoneTrack et al. can do this) looks identical to a real success in the
+    Status column alone - this is what actually shows the difference."""
+    if not response_out:
+        return ""
+    return f"{response_out.get('status_code', '')}: {response_out.get('body', '')}"
 
 
 def _endpoint_target(endpoint_cfg: dict) -> str:

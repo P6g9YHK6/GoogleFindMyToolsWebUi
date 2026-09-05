@@ -5,13 +5,17 @@ from datetime import datetime
 
 from croniter import croniter
 
-from webui import device_location_store, settings_store, ws
+from webui import demo_mode, device_location_store, settings_store, ws
 from webui.auth_state import is_logged_in
 from webui.deps import locate_device
-from webui.forwarders import config_store, latest_values_store, log_store
+from webui.forwarders import config_store, latest_values_store, log_store, semantic_map
+
+# These six are underscore-prefixed but deliberately shared with this module
+# specifically - see policy.py's __all__ comment.
 from webui.forwarders.policy import (
     _dispatch_forward,
     _endpoint_target,
+    _format_response_for_log,
     _forward_one,
     _record_forward_result,
     _serialize_location,
@@ -20,6 +24,14 @@ from webui.forwarders.policy import (
 logger = logging.getLogger("webui.scheduler")
 
 _tasks: dict[str, asyncio.Task] = {}
+
+
+def _merged_endpoint(canonic_id: str, endpoint_cfg: dict) -> tuple[str, dict]:
+    """(url, endpoint config merged with its recorded runtime state) - see
+    latest_values_store. Every forward needs this same merge before it can
+    run the skip-gates or dispatch."""
+    url = endpoint_cfg.get("url", "")
+    return url, {**endpoint_cfg, **latest_values_store.get_endpoint_state(canonic_id, url)}
 
 DEFAULT_CRON = "*/5 * * * *"
 
@@ -68,7 +80,9 @@ def cron_preview(cron_expr: str, count: int = 3, base: datetime | None = None) -
 async def _poll_device(canonic_id: str):
     while True:
         device_cfg = config_store.get_device_config(canonic_id)
-        endpoints = device_cfg.get("endpoints") if device_cfg else None
+        if device_cfg is None:
+            return
+        endpoints = device_cfg.get("endpoints")
         if not endpoints:
             return
 
@@ -99,6 +113,11 @@ async def _poll_device(canonic_id: str):
         # respectively - see webui/forwarders/custom.py's build_context.
         name = device_cfg.get("display_name", canonic_id)
         google_name = device_cfg.get("google_name") or name
+        # Manufacturer/model/type/etc - see webui/routers/settings.py's
+        # _rows(), which is what actually persists this (same reasoning as
+        # google_name just above: this poll loop never talks to Google's
+        # device-list API itself).
+        device_meta = device_cfg.get("device_meta")
 
         if not is_logged_in():
             # Don't trigger the Google login flow from the background poller -
@@ -110,6 +129,13 @@ async def _poll_device(canonic_id: str):
             except Exception as e:
                 locations = []
                 logger.warning("Locate failed for %s: %s", name, e)
+
+        # Fills in fixed coordinates for any SEMANTIC reading with a
+        # configured name (see webui/forwarders/semantic_map.py and
+        # settings_store's semantic_location_map) - done once here, before
+        # storage or forwarding, so both see the same already-mapped
+        # locations and neither has to know about the mapping itself.
+        locations = semantic_map.apply_semantic_mapping(locations, settings_store.load().get("semantic_location_map", {}))
 
         already_seen_by_index: list[bool] = []
         is_most_recent_by_index: list[bool] = []
@@ -130,8 +156,8 @@ async def _poll_device(canonic_id: str):
             # decrypt_locations.py) in no particular order - computed once
             # per batch here, same "skip" role as already_seen_by_index
             # above, for policy._skip_not_most_recent's per-endpoint toggle.
-            most_recent_time = max(
-                (loc.get("time") for loc in locations if loc.get("time") is not None), default=None,
+            most_recent_time: int | None = max(
+                (loc["time"] for loc in locations if loc.get("time") is not None), default=None,
             )
             is_most_recent_by_index = [
                 most_recent_time is None or loc.get("time") == most_recent_time for loc in locations
@@ -150,10 +176,11 @@ async def _poll_device(canonic_id: str):
         results: dict[int, dict] = {}
         for location, already_seen, is_most_recent in zip(locations, already_seen_by_index, is_most_recent_by_index):
             for i in due_indices:
-                url = endpoints[i].get("url", "")
-                merged = {**endpoints[i], **latest_values_store.get_endpoint_state(canonic_id, url)}
+                url, merged = _merged_endpoint(canonic_id, endpoints[i])
+                response_out: dict = {}
                 status = await asyncio.to_thread(
-                    _forward_one, merged, location, google_name, name, already_seen, is_most_recent,
+                    _forward_one, merged, location, google_name, name, canonic_id, device_meta,
+                    already_seen, is_most_recent, response_out,
                 )
                 results[i] = {"status": status, "location": location, "url": url, "merged": merged}
                 log_store.append(
@@ -163,11 +190,11 @@ async def _poll_device(canonic_id: str):
                     target=_endpoint_target(endpoints[i]),
                     status=status,
                     payload=_serialize_location(location),
+                    response=_format_response_for_log(response_out),
                 )
         for i in due_indices:
             if i not in results:
-                url = endpoints[i].get("url", "")
-                merged = {**endpoints[i], **latest_values_store.get_endpoint_state(canonic_id, url)}
+                url, merged = _merged_endpoint(canonic_id, endpoints[i])
                 results[i] = {"status": "no location", "location": None, "url": url, "merged": merged}
 
         now_ts = int(time.time())
@@ -211,9 +238,9 @@ async def forward_now(canonic_id: str, index: int) -> dict | None:
     # alias, google_name the account's real (fixed) name.
     name = device_cfg.get("display_name", canonic_id)
     google_name = device_cfg.get("google_name") or name
+    device_meta = device_cfg.get("device_meta")
     endpoint_cfg = endpoints[index]
-    url = endpoint_cfg.get("url", "")
-    merged = {**endpoint_cfg, **latest_values_store.get_endpoint_state(canonic_id, url)}
+    url, merged = _merged_endpoint(canonic_id, endpoint_cfg)
 
     try:
         locations = await locate_device(canonic_id, name)
@@ -221,10 +248,17 @@ async def forward_now(canonic_id: str, index: int) -> dict | None:
         locations = []
         logger.warning("Locate failed for %s: %s", name, e)
 
+    # See the matching comment in _poll_device above.
+    locations = semantic_map.apply_semantic_mapping(locations, settings_store.load().get("semantic_location_map", {}))
+
     status = "no location"
     for location in locations:
         endpoint_location = location
-        status = await asyncio.to_thread(_dispatch_forward, endpoint_cfg, endpoint_location, google_name, name)
+        response_out: dict = {}
+        status = await asyncio.to_thread(
+            _dispatch_forward, endpoint_cfg, endpoint_location, google_name, name, canonic_id, device_meta,
+            response_out,
+        )
         log_store.append(
             canonic_id=canonic_id,
             device_name=name,
@@ -232,6 +266,7 @@ async def forward_now(canonic_id: str, index: int) -> dict | None:
             target=_endpoint_target(endpoint_cfg),
             status=status,
             payload=_serialize_location(endpoint_location),
+            response=_format_response_for_log(response_out),
         )
         _record_forward_result(merged, status, endpoint_location, name)
 
@@ -250,6 +285,13 @@ def restart_device(canonic_id: str):
     if existing:
         existing.cancel()
 
+    if demo_mode.is_demo_mode():
+        # A demo visitor saving a device with endpoints must not spawn a
+        # real (if harmless - every call it would make is itself demo-aware)
+        # background polling task - see webui/main.py's lifespan, which
+        # already skips start_all() for the same reason.
+        return
+
     device_cfg = config_store.get_device_config(canonic_id)
     if device_cfg and device_cfg.get("endpoints"):
         _tasks[canonic_id] = asyncio.create_task(_poll_device(canonic_id))
@@ -264,3 +306,16 @@ def stop_all():
     for task in _tasks.values():
         task.cancel()
     _tasks.clear()
+
+
+def dead_tasks() -> list[str]:
+    """canonic_ids whose polling task crashed - ended via an unhandled
+    exception rather than a normal return (a device with no endpoints, or
+    every endpoint's cron invalid, exits _poll_device on purpose and isn't
+    a failure) or a cancel from stop_all()/restart_device(). A crashed task
+    never restarts itself - only a fresh start_all() (a container restart)
+    respawns it. See webui/main.py's /health."""
+    return [
+        canonic_id for canonic_id, task in _tasks.items()
+        if task.done() and not task.cancelled() and task.exception() is not None
+    ]

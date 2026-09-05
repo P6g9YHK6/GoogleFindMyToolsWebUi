@@ -21,6 +21,14 @@ def test_serialize_location_falls_back_to_str_for_unserializable_values():
     assert "weird-value" in payload
 
 
+def test_format_response_for_log_is_blank_when_nothing_was_received():
+    assert policy._format_response_for_log({}) == ""
+
+
+def test_format_response_for_log_combines_status_and_body():
+    assert policy._format_response_for_log({"status_code": 200, "body": '{"done":1}'}) == '200: {"done":1}'
+
+
 def _traccar_endpoint(**overrides) -> dict:
     endpoint = {
         "type": "traccar", "method": "GET", "url": "http://x/",
@@ -44,6 +52,25 @@ def test_forward_one_dispatches_via_the_generic_custom_forwarder():
     unroutable = _traccar_endpoint(url="http://127.0.0.1:9/")
     status = policy._forward_one(unroutable, location)
     assert status.startswith("error:")
+
+
+def test_forward_one_threads_response_out_through_to_the_real_forwarder(monkeypatch):
+    from webui.forwarders import custom
+
+    class FakeResponse:
+        status_code = 201
+        text = "created"
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(custom.httpx, "request", lambda method, url, **kwargs: FakeResponse())
+
+    location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
+    response_out = {}
+    status = policy._forward_one(_traccar_endpoint(), location, response_out=response_out)
+    assert status == "ok"
+    assert response_out == {"status_code": 201, "body": "created"}
 
 
 def test_endpoint_target_uses_the_method_and_url():
@@ -137,6 +164,18 @@ def test_too_close_to_bother_requires_the_toggle_and_a_prior_position():
         {"is_semantic": True, "latitude": None},
     ) is False
 
+    # ...unless a semantic reading was given mapped coordinates (see
+    # webui/forwarders/semantic_map.py) - then it behaves exactly like a
+    # real fix for this gate, since it now has a real latitude to compare.
+    mapped_semantic = {"is_semantic": True, "semantic_name": "Home", "latitude": 45.0, "longitude": 9.0}
+    assert policy._too_close_to_bother(
+        {"skip_if_close": True, "last_sent_lat": 45.0, "last_sent_lon": 9.0}, mapped_semantic,
+    ) is True
+    far_mapped_semantic = {"is_semantic": True, "semantic_name": "Work", "latitude": 46.0, "longitude": 9.0}
+    assert policy._too_close_to_bother(
+        {"skip_if_close": True, "last_sent_lat": 45.0, "last_sent_lon": 9.0}, far_mapped_semantic,
+    ) is False
+
 
 def test_stale_duplicate_requires_the_toggle_and_a_prior_send():
     now = 1_000_000.0
@@ -174,10 +213,21 @@ def test_stale_duplicate_requires_the_toggle_and_a_prior_send():
         {"is_semantic": True, "time": None}, now=now,
     ) is False
 
+    # ...unless a semantic reading was given mapped coordinates (see
+    # webui/forwarders/semantic_map.py) - then it behaves exactly like a
+    # real fix for this gate too, since it now has both a latitude and a
+    # real "time" to compare.
+    mapped_stale_semantic = {
+        "is_semantic": True, "semantic_name": "Home", "latitude": 45.0, "longitude": 9.0, "time": stale_time,
+    }
+    assert policy._stale_duplicate(
+        {"skip_if_stale": True, "last_sent_fix_time": stale_time}, mapped_stale_semantic, now=now,
+    ) is True
+
 
 def test_forward_one_reports_stale_duplicate_skip_without_dispatching(monkeypatch):
     dispatched = []
-    monkeypatch.setattr(policy, "_dispatch_forward", lambda cfg, loc, name="", alias=None: dispatched.append(loc) or "ok")
+    monkeypatch.setattr(policy, "_dispatch_forward", lambda cfg, loc, name="", alias=None, tracker_id="", device_meta=None, response_out=None: dispatched.append(loc) or "ok")
 
     now = 1_000_000.0
     stale_time = now - policy.FRESH_FIX_AGE_S - 1
@@ -206,7 +256,7 @@ def test_skip_already_seen_defaults_on_but_can_be_opted_out_per_endpoint():
 
 def test_forward_one_reports_already_seen_skip_without_dispatching(monkeypatch):
     dispatched = []
-    monkeypatch.setattr(policy, "_dispatch_forward", lambda cfg, loc, name="", alias=None: dispatched.append(loc) or "ok")
+    monkeypatch.setattr(policy, "_dispatch_forward", lambda cfg, loc, name="", alias=None, tracker_id="", device_meta=None, response_out=None: dispatched.append(loc) or "ok")
 
     endpoint_cfg = _traccar_endpoint()
     location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
@@ -222,7 +272,7 @@ def test_forward_one_reports_already_seen_skip_without_dispatching(monkeypatch):
 
 def test_forward_one_forwards_an_already_seen_reading_when_the_endpoint_opted_out(monkeypatch):
     dispatched = []
-    monkeypatch.setattr(policy, "_dispatch_forward", lambda cfg, loc, name="", alias=None: dispatched.append(loc) or "ok")
+    monkeypatch.setattr(policy, "_dispatch_forward", lambda cfg, loc, name="", alias=None, tracker_id="", device_meta=None, response_out=None: dispatched.append(loc) or "ok")
 
     endpoint_cfg = _traccar_endpoint(skip_if_already_seen=False)
     location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
@@ -246,7 +296,7 @@ def test_skip_not_most_recent_defaults_on_but_can_be_opted_out_per_endpoint():
 
 def test_forward_one_reports_not_most_recent_skip_without_dispatching(monkeypatch):
     dispatched = []
-    monkeypatch.setattr(policy, "_dispatch_forward", lambda cfg, loc, name="", alias=None: dispatched.append(loc) or "ok")
+    monkeypatch.setattr(policy, "_dispatch_forward", lambda cfg, loc, name="", alias=None, tracker_id="", device_meta=None, response_out=None: dispatched.append(loc) or "ok")
 
     endpoint_cfg = _traccar_endpoint()
     location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
@@ -262,7 +312,7 @@ def test_forward_one_reports_not_most_recent_skip_without_dispatching(monkeypatc
 
 def test_forward_one_forwards_an_older_reading_when_the_endpoint_opted_out_of_most_recent_only(monkeypatch):
     dispatched = []
-    monkeypatch.setattr(policy, "_dispatch_forward", lambda cfg, loc, name="", alias=None: dispatched.append(loc) or "ok")
+    monkeypatch.setattr(policy, "_dispatch_forward", lambda cfg, loc, name="", alias=None, tracker_id="", device_meta=None, response_out=None: dispatched.append(loc) or "ok")
 
     endpoint_cfg = _traccar_endpoint(only_most_recent=False)
     location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1}
@@ -274,7 +324,7 @@ def test_forward_one_forwards_an_older_reading_when_the_endpoint_opted_out_of_mo
 
 def test_forward_one_reports_distance_skip_without_dispatching(monkeypatch):
     dispatched = []
-    monkeypatch.setattr(policy, "_dispatch_forward", lambda cfg, loc, name="", alias=None: dispatched.append(loc) or "ok")
+    monkeypatch.setattr(policy, "_dispatch_forward", lambda cfg, loc, name="", alias=None, tracker_id="", device_meta=None, response_out=None: dispatched.append(loc) or "ok")
 
     endpoint_cfg = _traccar_endpoint(skip_if_close=True, min_movement_m=100, last_sent_lat=45.0, last_sent_lon=9.0)
 
@@ -285,3 +335,112 @@ def test_forward_one_reports_distance_skip_without_dispatching(monkeypatch):
     far_location = {"is_semantic": False, "latitude": 46.0, "longitude": 9.0}
     assert policy._forward_one(endpoint_cfg, far_location) == "ok"
     assert dispatched == [far_location]
+
+
+def test_skip_blocked_status_requires_filter_by_status_to_be_on():
+    location = {"is_semantic": False, "status": "AGGREGATED"}
+
+    # no filter_by_status key at all -> the checkboxes are hidden and never
+    # consulted, regardless of what blocked_statuses holds
+    assert policy._skip_blocked_status({}, location) is False
+    assert policy._skip_blocked_status({"blocked_statuses": ["AGGREGATED"]}, location) is False
+
+    # filter_by_status on, but this status isn't in blocked_statuses -> don't skip
+    assert policy._skip_blocked_status({"filter_by_status": True, "blocked_statuses": ["CROWDSOURCED"]}, location) is False
+
+    # filter_by_status on and this status is in blocked_statuses -> skip
+    assert policy._skip_blocked_status({"filter_by_status": True, "blocked_statuses": ["AGGREGATED"]}, location) is True
+
+    # SEMANTIC is a status like any other - filterable via the same mechanism
+    semantic_location = {"is_semantic": True, "status": "SEMANTIC"}
+    # not in blocked_statuses -> allowed through
+    assert policy._skip_blocked_status({"filter_by_status": True, "blocked_statuses": ["AGGREGATED"]}, semantic_location) is False
+    # explicitly unchecked -> skipped, like any other status
+    assert policy._skip_blocked_status({"filter_by_status": True, "blocked_statuses": ["SEMANTIC"]}, semantic_location) is True
+
+
+def test_forward_one_reports_blocked_status_skip_without_dispatching(monkeypatch):
+    dispatched = []
+    monkeypatch.setattr(policy, "_dispatch_forward", lambda cfg, loc, name="", alias=None, tracker_id="", device_meta=None, response_out=None: dispatched.append(loc) or "ok")
+
+    endpoint_cfg = _traccar_endpoint(filter_by_status=True, blocked_statuses=["AGGREGATED"])
+
+    coarse_location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1, "status": "AGGREGATED"}
+    assert policy._forward_one(endpoint_cfg, coarse_location) == "skipped: fix type AGGREGATED is unchecked in this endpoint's filter"
+    assert dispatched == []  # the network dispatch was never reached
+
+    gps_location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1, "status": "LAST_KNOWN"}
+    assert policy._forward_one(endpoint_cfg, gps_location) == "ok"
+    assert dispatched == [gps_location]
+
+
+def test_skip_not_own_report_requires_the_toggle():
+    location = {"is_semantic": False, "is_own_report": False}
+
+    # toggle off -> never skip, regardless of who reported it
+    assert policy._skip_not_own_report({"skip_if_not_own_report": False}, location) is False
+
+    # toggle on, crowdsourced (not this tracker's own report) -> skip
+    assert policy._skip_not_own_report({"skip_if_not_own_report": True}, location) is True
+
+    # toggle on, this tracker's own report -> don't skip
+    own_location = {"is_semantic": False, "is_own_report": True}
+    assert policy._skip_not_own_report({"skip_if_not_own_report": True}, own_location) is False
+
+    # semantic locations carry no own_report distinction - never applies to them
+    semantic_location = {"is_semantic": True, "is_own_report": False}
+    assert policy._skip_not_own_report({"skip_if_not_own_report": True}, semantic_location) is False
+
+
+def test_forward_one_reports_not_own_report_skip_without_dispatching(monkeypatch):
+    dispatched = []
+    monkeypatch.setattr(policy, "_dispatch_forward", lambda cfg, loc, name="", alias=None, tracker_id="", device_meta=None, response_out=None: dispatched.append(loc) or "ok")
+
+    endpoint_cfg = _traccar_endpoint(skip_if_not_own_report=True)
+
+    crowdsourced_location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1, "is_own_report": False}
+    assert policy._forward_one(endpoint_cfg, crowdsourced_location) == "skipped: not this tracker's own report (crowdsourced by another device)"
+    assert dispatched == []  # the network dispatch was never reached
+
+    own_location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1, "is_own_report": True}
+    assert policy._forward_one(endpoint_cfg, own_location) == "ok"
+    assert dispatched == [own_location]
+
+
+def test_skip_inaccurate_requires_the_toggle_and_a_real_accuracy_value():
+    location = {"is_semantic": False, "accuracy": 500}
+
+    # toggle off -> never skip, regardless of accuracy
+    assert policy._skip_inaccurate({"skip_if_inaccurate": False}, location) is False
+
+    # toggle on, over the default threshold -> skip
+    assert policy._skip_inaccurate({"skip_if_inaccurate": True}, location) is True
+
+    # toggle on, under a custom threshold -> don't skip
+    precise_location = {"is_semantic": False, "accuracy": 10}
+    assert policy._skip_inaccurate({"skip_if_inaccurate": True, "max_accuracy_m": 50}, precise_location) is False
+
+    # toggle on, over a custom threshold -> skip
+    assert policy._skip_inaccurate({"skip_if_inaccurate": True, "max_accuracy_m": 50}, location) is True
+
+    # semantic locations carry no accuracy - never applies to them
+    semantic_location = {"is_semantic": True, "accuracy": 500}
+    assert policy._skip_inaccurate({"skip_if_inaccurate": True}, semantic_location) is False
+
+    # no accuracy value at all -> never applies
+    assert policy._skip_inaccurate({"skip_if_inaccurate": True}, {"is_semantic": False, "accuracy": None}) is False
+
+
+def test_forward_one_reports_inaccurate_skip_without_dispatching(monkeypatch):
+    dispatched = []
+    monkeypatch.setattr(policy, "_dispatch_forward", lambda cfg, loc, name="", alias=None, tracker_id="", device_meta=None, response_out=None: dispatched.append(loc) or "ok")
+
+    endpoint_cfg = _traccar_endpoint(skip_if_inaccurate=True, max_accuracy_m=100)
+
+    coarse_location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1, "accuracy": 500}
+    assert policy._forward_one(endpoint_cfg, coarse_location) == "skipped: accuracy radius over 100m"
+    assert dispatched == []  # the network dispatch was never reached
+
+    precise_location = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1, "accuracy": 10}
+    assert policy._forward_one(endpoint_cfg, precise_location) == "ok"
+    assert dispatched == [precise_location]

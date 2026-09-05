@@ -1,9 +1,13 @@
+from collections.abc import Callable
+from itertools import zip_longest
+from typing import Any
+
 import yaml
 from fastapi import APIRouter, Form, Request
 
 from Auth.fcm_receiver import FcmReceiver
 from Auth.token_cache import clear_all_cached_values, get_cached_value
-from webui import browser_provisioning, notify, settings_store
+from webui import browser_provisioning, demo_data, demo_mode, notify, settings_store
 from webui.auth_state import is_logged_in
 from webui.deps import query_gate
 from webui.templating import templates
@@ -22,13 +26,78 @@ def _to_bool(value) -> bool:
     return bool(value)
 
 
-_APP_SETTINGS_SCHEMA = {
+_SEMANTIC_MATCH_MODES = ("full", "partial")
+
+
+def _to_semantic_map(value) -> dict:
+    """Used as an _APP_SETTINGS_SCHEMA caster for the YAML-edit path - see
+    _parse_semantic_map_form for the structured-form equivalent. Expects
+    {name: {"latitude": ..., "longitude": ..., "match_mode": "full"|
+    "partial"}}; raises (caught by _validate_app_settings, same as every
+    other caster here) on anything else, including a name with no
+    coordinates, a non-numeric one, or an unrecognized match_mode.
+    match_mode itself is optional and defaults to "full" - entries saved
+    before this field existed still validate."""
+    if not isinstance(value, dict):
+        raise TypeError("not a mapping")
+    result = {}
+    for name, coords in value.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("semantic name must be a non-empty string")
+        if not isinstance(coords, dict):
+            raise TypeError("coordinates must be a mapping")
+        match_mode = coords.get("match_mode", "full")
+        if match_mode not in _SEMANTIC_MATCH_MODES:
+            raise ValueError(f"match_mode must be one of {_SEMANTIC_MATCH_MODES}")
+        result[name] = {
+            "latitude": float(coords["latitude"]),
+            "longitude": float(coords["longitude"]),
+            "match_mode": match_mode,
+        }
+    return result
+
+
+def _parse_semantic_map_form(form) -> dict:
+    """Structured-form equivalent of _to_semantic_map above - reads the
+    semantic_name[]/semantic_lat[]/semantic_lon[]/semantic_match_mode[]
+    quadruples posted by the "Semantic location mapping" table (see
+    auth/_app_settings.html), same parallel-list convention as
+    webui/forwarders/settings_service.py's parse_kv_rows for endpoint
+    headers. A row with a blank name or a non-numeric lat/lon is silently
+    dropped rather than rejecting the whole save - the same "just skip a
+    genuinely empty row" leniency an unchecked checkbox or blank text field
+    gets elsewhere on this form. An unrecognized/missing match_mode falls
+    back to "full" instead of dropping the row - coordinates are what make
+    a row valid, not the match type."""
+    names = form.getlist("semantic_name")
+    lats = form.getlist("semantic_lat")
+    lons = form.getlist("semantic_lon")
+    match_modes = form.getlist("semantic_match_mode")
+    result = {}
+    for name, lat, lon, match_mode in zip_longest(names, lats, lons, match_modes, fillvalue=""):
+        name = name.strip()
+        if not name:
+            continue
+        try:
+            result[name] = {
+                "latitude": float(lat),
+                "longitude": float(lon),
+                "match_mode": match_mode if match_mode in _SEMANTIC_MATCH_MODES else "full",
+            }
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+_APP_SETTINGS_SCHEMA: dict[str, Callable[[Any], Any]] = {
     "query_throttle_max": int,
     "query_throttle_window_s": float,
     "query_min_spread_s": float,
     "apprise_urls": str,
     "apprise_notify_level": str,
     "devices_page_most_recent_only": _to_bool,
+    "staleness_sweep_interval_s": int,
+    "semantic_location_map": _to_semantic_map,
 }
 
 router = APIRouter()
@@ -43,6 +112,10 @@ _DIAGNOSTIC_KEYS = ["username", "aas_token", "fcm_credentials", "shared_key", "o
 
 
 def _auth_status() -> dict:
+    if demo_mode.is_demo_mode():
+        # A fully "signed in" account, not the real (empty-in-demo-mode)
+        # token cache - see webui/demo_data.py.
+        return demo_data.demo_auth_status()
     return {
         "logged_in": is_logged_in(),
         "username": get_cached_value("username"),
@@ -82,7 +155,16 @@ async def save_app_settings(
     # field default here (nothing browser-side to distinguish "off" from
     # "never touched" for a plain, non-htmx form like this one).
     devices_page_most_recent_only: bool = Form(False),
+    staleness_sweep_interval_s: int = Form(3600),
 ):
+    # The semantic-name/lat/lon rows are a dynamic, variable-length table
+    # (see auth/_app_settings.html) - posted as parallel
+    # semantic_name[]/semantic_lat[]/semantic_lon[] lists, so they're read
+    # straight off the raw form rather than as individual Form(...) params
+    # like everything else above (same reason
+    # webui/forwarders/settings_service.py's endpoint headers/blocked
+    # statuses go through raw form parsing instead).
+    form = await request.form()
     app_settings = {
         "query_throttle_max": query_throttle_max,
         "query_throttle_window_s": query_throttle_window_s,
@@ -90,6 +172,8 @@ async def save_app_settings(
         "apprise_urls": apprise_urls,
         "apprise_notify_level": apprise_notify_level,
         "devices_page_most_recent_only": devices_page_most_recent_only,
+        "staleness_sweep_interval_s": staleness_sweep_interval_s,
+        "semantic_location_map": _parse_semantic_map_form(form),
     }
     _apply_app_settings(app_settings)
 
@@ -177,6 +261,12 @@ async def auth_status(request: Request):
 
 @router.post("/auth/clear")
 async def auth_clear(request: Request):
+    if demo_mode.is_demo_mode():
+        # Nothing real to clear - see _auth_status() above - and this skips
+        # touching the real (harmless but pointless) token cache/FcmReceiver
+        # singleton on a public instance.
+        return templates.TemplateResponse(request, "auth/_status.html", {"status": _auth_status()})
+
     if browser_provisioning.is_active():
         # Clearing mid-flow is exactly how the "aas_token present but
         # fcm_credentials missing" split-brain state kept happening: a sign-in
@@ -204,11 +294,25 @@ async def auth_clear(request: Request):
     })
 
 
+_DEMO_LOGIN_DISABLED_STATE = {
+    "phase": "error", "message": "Sign-in is disabled on this demo instance.", "percent": 0,
+    "error": "disabled in demo mode", "cleanup_warning": None,
+}
+
+
 @router.post("/auth/login/start")
 async def auth_login_start():
+    if demo_mode.is_demo_mode():
+        # Server-side block, not just the disabled button in auth/login.html
+        # - never reaches browser_provisioning.start() (itself also guarded,
+        # see that module) so a public instance can never be made to spin up
+        # a real embedded-browser OAuth session.
+        return {"started": False, "state": _DEMO_LOGIN_DISABLED_STATE}
     return await browser_provisioning.start()
 
 
 @router.get("/auth/login/poll")
 async def auth_login_poll():
+    if demo_mode.is_demo_mode():
+        return _DEMO_LOGIN_DISABLED_STATE
     return browser_provisioning.get_state()

@@ -6,10 +6,10 @@ import logging
 import time
 
 from FMDNCrypto.eid_generator import ROTATION_PERIOD, generate_eid
-from NovaApi.ExecuteAction.LocateTracker.decrypt_locations import is_mcu_tracker, retrieve_identity_key
 from ProtoDecoders.DeviceUpdate_pb2 import DevicesList, PublicKeyIdList, UploadPrecomputedPublicKeyIdsRequest
 from SpotApi.CreateBleDevice.config import max_truncated_eid_seconds_server
 from SpotApi.CreateBleDevice.util import hours_to_seconds
+from SpotApi.identity_key import is_mcu_tracker, retrieve_identity_key
 from SpotApi.spot_request import spot_request
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,6 @@ def get_next_eids(eik: bytes, pair_date: int, start_date: int, duration_seconds:
 
         public_key_id_list.append(info)
 
-        current_time_offset += 1024
+        current_time_offset += ROTATION_PERIOD
 
     return public_key_id_list

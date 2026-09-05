@@ -3,7 +3,8 @@ import re
 import threading
 import time
 
-from webui import config
+from webui import config, demo_data, demo_mode
+from webui.line_log_io import append_line, read_lines, write_lines
 
 _lock = threading.Lock()
 
@@ -35,16 +36,19 @@ def _format_line(entry: dict) -> str:
         _sanitize(entry["target"]),
         _sanitize(entry["status"]),
         _sanitize(entry.get("payload", "")),
+        _sanitize(entry.get("response", "")),
     ])
 
 
 def _parse_line(line: str) -> dict | None:
-    parts = line.split("\t", 6)
+    parts = line.split("\t", 7)
     if len(parts) == 6:
         parts.append("")  # a line written before the payload column existed
-    if len(parts) != 7:
+    if len(parts) == 7:
+        parts.append("")  # a line written before the response column existed
+    if len(parts) != 8:
         return None
-    time_s, canonic_id, device_name, endpoint_type, target, status, payload = parts
+    time_s, canonic_id, device_name, endpoint_type, target, status, payload, response = parts
     try:
         entry_time = int(time_s)
     except ValueError:
@@ -57,6 +61,7 @@ def _parse_line(line: str) -> dict | None:
         "target": target,
         "status": status,
         "payload": payload,
+        "response": response,
         "level": _level(status),
     }
 
@@ -81,35 +86,31 @@ def _migrate_from_legacy_json() -> list[dict] | None:
 
 
 def _read_all() -> list[dict]:
-    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     if not config.FORWARD_LOG_PATH.exists():
         return _migrate_from_legacy_json() or []
-    entries = []
-    try:
-        with open(config.FORWARD_LOG_PATH) as f:
-            for line in f:
-                line = line.rstrip("\n")
-                if not line:
-                    continue
-                parsed = _parse_line(line)
-                if parsed is not None:
-                    entries.append(parsed)
-    except OSError:
-        return []
-    return entries
+    return read_lines(config.FORWARD_LOG_PATH, _parse_line)
 
 
 def _write_all(entries: list[dict]):
-    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(config.FORWARD_LOG_PATH, "w") as f:
-        for entry in entries:
-            f.write(_format_line(entry) + "\n")
+    write_lines(config.FORWARD_LOG_PATH, entries, _format_line)
 
 
-def append(canonic_id: str, device_name: str, endpoint_type: str, target: str, status: str, payload: str = ""):
+def append(
+    canonic_id: str, device_name: str, endpoint_type: str, target: str, status: str,
+    payload: str = "", response: str = "",
+):
+    if demo_mode.is_demo_mode():
+        # A "Send now" click in demo mode must never write a real entry to
+        # shared disk - see webui/demo_mode.py. recent_entries() below
+        # already serves a fixed, canned log regardless.
+        return
     with _lock:
-        entries = _read_all()
-        entries.append({
+        if not config.FORWARD_LOG_PATH.exists():
+            # Materializes the file (migrated from forward_log.json) if
+            # there's legacy data to fold in, same as a plain read would -
+            # append_line below only ever creates/appends, it doesn't migrate.
+            _migrate_from_legacy_json()
+        entry = {
             "time": int(time.time()),
             "canonic_id": canonic_id,
             "device_name": device_name,
@@ -117,15 +118,15 @@ def append(canonic_id: str, device_name: str, endpoint_type: str, target: str, s
             "target": target,
             "status": status,
             "payload": payload,
-        })
-        # Keep the log file bounded instead of growing it forever.
-        if len(entries) > config.FORWARD_LOG_MAX_ENTRIES:
-            entries = entries[-config.FORWARD_LOG_MAX_ENTRIES:]
-        _write_all(entries)
+            "response": response,
+        }
+        append_line(config.FORWARD_LOG_PATH, entry, _format_line, _parse_line, config.FORWARD_LOG_MAX_ENTRIES)
 
 
 def recent_entries(limit: int = 500) -> list[dict]:
     """Newest first."""
+    if demo_mode.is_demo_mode():
+        return demo_data.demo_forward_log_entries()[:limit]
     with _lock:
         entries = _read_all()
     return list(reversed(entries))[:limit]

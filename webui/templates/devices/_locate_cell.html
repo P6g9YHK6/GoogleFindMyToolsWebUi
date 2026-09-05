@@ -1,16 +1,20 @@
 {% if error %}
-  <span style="color:#c00;">Locate failed: {{ error }}</span>
+  <span class="form-error">Locate failed: {{ error }}</span>
 {% elif locations %}
   <ul>
   {% for loc in locations %}
     {% if loc.is_semantic %}
     <li>
-        {{ loc.semantic_name }}
+        {{ loc.semantic_name }}{% if loc.latitude is not none %} (mapped){% endif %}
     </li>
-    {% else %}
+    {% endif %}
+    {% if loc.latitude is not none %}
     {# data-loc-key matches the "<canonic_id>:<index>" key static/app.js
        uses for the same location's map pin, so hovering either end can
-       find the other (see seedMapMarkers/upsertDeviceMarkers). #}
+       find the other (see seedMapMarkers/upsertDeviceMarkers). Also shown
+       for a semantic reading with mapped coordinates (see
+       webui/forwarders/semantic_map.py), alongside its name above - not
+       just "not semantic" anymore. #}
     <li data-loc-key="{{ canonic_id }}:{{ loop.index0 }}" style="--dot-color: {{ location_color(canonic_id, loop.index0) }};">
         <span class="loc-dot"></span>
         {{ "%.5f"|format(loc.latitude) }}, {{ "%.5f"|format(loc.longitude) }}
@@ -23,12 +27,18 @@
 {% endif %}
 
 {% if oob_swaps %}
-<div id="map-links-{{ canonic_id }}" hx-swap-oob="true">
+{# Both OOB targets below must stay <td>, matching the actual element
+   _table.html gives each of these ids - htmx's OOB swap is an outerHTML
+   replace by id, and swapping a <td> for a bare <div> here left a <div>
+   sitting inside a <tr>, which isn't valid table content: the browser's
+   parser foster-parents it out of the table entirely, so it rendered as a
+   stray value to the left of the whole table instead of inside its cell. #}
+<td id="map-links-{{ canonic_id }}" hx-swap-oob="true">
   {% include "devices/_map_links_cell.html" %}
-</div>
+</td>
 {# "Polled at" used to be an inline line under the coordinate list itself -
    moved to its own column (see _table.html) since it's per-fetch metadata,
    not per-location, and having it only in this cell threw off row-for-row
    alignment against the Map column next to it. #}
-<div id="polled-at-{{ canonic_id }}" hx-swap-oob="true">{{ fetched_at_str or "-" }}</div>
+<td id="polled-at-{{ canonic_id }}" hx-swap-oob="true">{{ fetched_at_str or "-" }}</td>
 {% endif %}

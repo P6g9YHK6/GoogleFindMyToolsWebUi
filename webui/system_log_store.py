@@ -8,7 +8,8 @@ YAML, just tab-separated fields parsed back on read).
 import re
 import threading
 
-from webui import config
+from webui import config, demo_data, demo_mode
+from webui.line_log_io import append_line, read_lines, write_lines
 
 _lock = threading.Lock()
 
@@ -41,42 +42,28 @@ def _parse_line(line: str) -> dict | None:
 
 
 def _read_all() -> list[dict]:
-    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    if not config.SYSTEM_LOG_PATH.exists():
-        return []
-    entries = []
-    try:
-        with open(config.SYSTEM_LOG_PATH) as f:
-            for line in f:
-                line = line.rstrip("\n")
-                if not line:
-                    continue
-                parsed = _parse_line(line)
-                if parsed is not None:
-                    entries.append(parsed)
-    except OSError:
-        return []
-    return entries
+    return read_lines(config.SYSTEM_LOG_PATH, _parse_line)
 
 
 def _write_all(entries: list[dict]):
-    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(config.SYSTEM_LOG_PATH, "w") as f:
-        for entry in entries:
-            f.write(_format_line(entry) + "\n")
+    write_lines(config.SYSTEM_LOG_PATH, entries, _format_line)
 
 
 def append(level: str, logger_name: str, message: str, when: int):
     with _lock:
-        entries = _read_all()
-        entries.append({"time": when, "level": level, "logger": logger_name, "message": message})
-        if len(entries) > config.SYSTEM_LOG_MAX_ENTRIES:
-            entries = entries[-config.SYSTEM_LOG_MAX_ENTRIES:]
-        _write_all(entries)
+        entry = {"time": when, "level": level, "logger": logger_name, "message": message}
+        append_line(config.SYSTEM_LOG_PATH, entry, _format_line, _parse_line, config.SYSTEM_LOG_MAX_ENTRIES)
 
 
 def recent_entries(limit: int = 500) -> list[dict]:
     """Newest first."""
+    if demo_mode.is_demo_mode():
+        # The Logs page always shows this fixed, canned history in demo mode
+        # (see webui/demo_data.py) rather than this process's own real
+        # operational log - append() below is deliberately left writing
+        # normally regardless, so the operator running a public instance
+        # still gets real logs in `docker logs`/system.log.
+        return demo_data.demo_system_log_entries()[:limit]
     with _lock:
         entries = _read_all()
     return list(reversed(entries))[:limit]
