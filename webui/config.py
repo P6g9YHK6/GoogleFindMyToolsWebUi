@@ -80,11 +80,35 @@ REGISTERED_TRACKERS_PATH = DATA_DIR / "registered_trackers.yaml"
 # A cold ESP-IDF build can take several minutes - see webui/firmware_build.py.
 GFMT_FIRMWARE_BUILD_TIMEOUT_S = int(os.environ.get("GFMT_FIRMWARE_BUILD_TIMEOUT_S", "900"))
 
-# On-demand ESP-IDF toolchain - under DATA_DIR (the volume mount), since
-# re-fetching ~1-2GB on every restart would be too slow. webui/esp_idf_provisioning.py.
-GFMT_ESP_IDF_DIR = DATA_DIR / "esp-idf"
-GFMT_ESP_IDF_TOOLS_DIR = DATA_DIR / "esp-idf-tools"
-# Only paid once per DATA_DIR, not per build - generous for a slow connection.
+# On-demand ESP-IDF toolchain (webui/esp_idf_provisioning.py) and the
+# throwaway firmware-build sandboxes (webui/firmware_build.py) live under
+# their own directory, deliberately separate from DATA_DIR: together they're
+# several GB and entirely rebuildable, so they don't belong in the volume
+# you're expected to back up. In the Docker image (docker/web/Dockerfile)
+# this is /firmware, which is NOT mounted by default - it sits in the
+# container's own writable layer, so a container replace wipes it and the
+# next build re-provisions the toolchain from scratch. Users who want it to
+# survive replaces can mount an optional volume there (docker-compose.yml,
+# the Unraid template). First provisioning is still only paid once per
+# directory (marker check in esp_idf_provisioning.py), not per build.
+GFMT_FIRMWARE_DIR = pathlib.Path(os.environ.get("GFMT_FIRMWARE_DIR") or (pathlib.Path(__file__).parent / "firmware"))
+
+# Keep at most this many recent build sandboxes (firmware_build.py's
+# prune_old_builds deletes the rest on every build and at startup) - bounds
+# growth from repeat/flash-happy building.
+GFMT_FIRMWARE_KEEP_BUILDS = int(os.environ.get("GFMT_FIRMWARE_KEEP_BUILDS", "5"))
+# Also delete a build sandbox once it's sat around this long, even if under
+# the keep-count - catches a build-and-forget volume that would otherwise hug
+# ~170MB x the count forever. Seconds, 0 disables the age sweep. 30 days.
+GFMT_FIRMWARE_BUILD_TTL_S = int(os.environ.get("GFMT_FIRMWARE_BUILD_TTL_S", str(30 * 24 * 3600)))
+# If the provisioned toolchain goes unused this long, the next startup (or
+# build) removes it to reclaim space - the marker-based is_provisioned()
+# check re-provisions it automatically on the next build. Seconds, 0 keeps it
+# indefinitely. 30 days.
+GFMT_ESP_IDF_IDLE_TTL_S = int(os.environ.get("GFMT_ESP_IDF_IDLE_TTL_S", str(30 * 24 * 3600)))
+GFMT_ESP_IDF_DIR = GFMT_FIRMWARE_DIR / "esp-idf"
+GFMT_ESP_IDF_TOOLS_DIR = GFMT_FIRMWARE_DIR / "esp-idf-tools"
+# Only paid once per directory, not per build - generous for a slow connection.
 GFMT_ESP_IDF_PROVISION_TIMEOUT_S = int(os.environ.get("GFMT_ESP_IDF_PROVISION_TIMEOUT_S", "1800"))
 
 # Only used when GFMT_TLS_CERT_PATH/GFMT_TLS_KEY_PATH above aren't set.

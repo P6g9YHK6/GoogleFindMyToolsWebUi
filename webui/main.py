@@ -13,6 +13,8 @@ from webui import (
     browser_provisioning,
     config,
     demo_mode,
+    esp_idf_provisioning,
+    firmware_build,
     log_capture,
     notify,
     scheduler,
@@ -65,6 +67,17 @@ async def lifespan(app: FastAPI):
         # own docstring for why a device with no forwarding endpoints (never
         # polled by any of that module's per-device loops) still needs this.
         staleness_task = asyncio.create_task(staleness.sweep_loop())
+        # Reclaim anything that grew while the app was down: a /firmware volume
+        # (firmware_builds and the on-demand ESP-IDF toolchain, see config.py's
+        # GFMT_FIRMWARE_* / GFMT_ESP_IDF_IDLE_TTL_S) shouldn't need a manual
+        # prune. First runs one-time relocation of any pre-move leftovers still
+        # sitting in DATA_DIR (can be a multi-GB cross-device copy on first
+        # run, all local - everything is a no-op when there's nothing to do),
+        # then the cleanup sweeps. All off the event loop, before serving.
+        await asyncio.to_thread(esp_idf_provisioning.migrate_legacy_dirs)
+        await asyncio.to_thread(firmware_build.migrate_legacy_builds_dir)
+        await asyncio.to_thread(firmware_build.prune_old_builds)
+        await asyncio.to_thread(esp_idf_provisioning.cleanup_if_stale)
     yield
     scheduler.stop_all()
     if staleness_task is not None:

@@ -4,6 +4,8 @@ tests/test_firmware.py). Follows tests/test_browser_stack.py's _FakeProc
 style, extended with communicate()."""
 
 import asyncio
+import os
+import time
 
 import webui.esp_idf_provisioning as esp_idf_provisioning
 from webui import config
@@ -173,3 +175,90 @@ async def test_get_env_parses_key_value_output(monkeypatch, tmp_path):
     # literal "$PATH" text was kept as-is, silently dropping /usr/bin (cmake,
     # ninja, git, ...) off the front of it entirely.
     assert env["PATH"] == "/fake/idf/tools:/usr/bin:/bin"
+
+
+def test_cleanup_if_stale_noop_when_ttl_disabled(monkeypatch, tmp_path):
+    idf_dir, tools_dir = _patch_dirs(monkeypatch, tmp_path)
+    idf_dir.mkdir()
+    tools_dir.mkdir()
+    (tools_dir / ".gfmt-provisioned").write_text("")
+    monkeypatch.setattr(config, "GFMT_ESP_IDF_IDLE_TTL_S", 0)
+
+    assert esp_idf_provisioning.cleanup_if_stale() is False
+    assert (tools_dir / ".gfmt-provisioned").exists()
+
+
+def test_cleanup_if_stale_noop_when_not_provisioned(monkeypatch, tmp_path):
+    _patch_dirs(monkeypatch, tmp_path)
+    monkeypatch.setattr(config, "GFMT_ESP_IDF_IDLE_TTL_S", 1)
+    assert esp_idf_provisioning.cleanup_if_stale() is False
+
+
+def test_cleanup_if_stale_removes_stale_toolchain(monkeypatch, tmp_path):
+    idf_dir, tools_dir = _patch_dirs(monkeypatch, tmp_path)
+    (idf_dir / "tools").mkdir(parents=True)
+    (idf_dir / "tools" / "idf.py").write_text("")
+    marker = tools_dir / ".gfmt-provisioned"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("")
+    # Backdate the marker's mtime by 2 days.
+    old = time.time() - 172800
+    os.utime(marker, (old, old))
+    monkeypatch.setattr(config, "GFMT_ESP_IDF_IDLE_TTL_S", 86400)  # 1 day
+
+    assert esp_idf_provisioning.cleanup_if_stale() is True
+    assert not idf_dir.exists()
+    assert not tools_dir.exists()
+
+
+def test_cleanup_if_stale_noop_when_fresh(monkeypatch, tmp_path):
+    idf_dir, tools_dir = _patch_dirs(monkeypatch, tmp_path)
+    idf_dir.mkdir()
+    tools_dir.mkdir()
+    (tools_dir / ".gfmt-provisioned").write_text("")  # fresh marker
+    monkeypatch.setattr(config, "GFMT_ESP_IDF_IDLE_TTL_S", 2592000)  # 30 days
+
+    assert esp_idf_provisioning.cleanup_if_stale() is False
+    assert idf_dir.exists()
+    assert tools_dir.exists()
+
+
+def test_migrate_legacy_dirs_moves_old_install(monkeypatch, tmp_path):
+    old_data = tmp_path / "data"
+    fw = tmp_path / "firmware"
+    (old_data / "esp-idf" / "tools").mkdir(parents=True)
+    (old_data / "esp-idf" / "tools" / "idf.py").write_text("")
+    (old_data / "esp-idf-tools").mkdir()
+    monkeypatch.setattr(config, "DATA_DIR", old_data)
+    monkeypatch.setattr(config, "GFMT_FIRMWARE_DIR", fw)
+
+    esp_idf_provisioning.migrate_legacy_dirs()
+
+    assert (fw / "esp-idf" / "tools" / "idf.py").exists()
+    assert (fw / "esp-idf-tools").is_dir()
+    assert not (old_data / "esp-idf").exists()
+    assert not (old_data / "esp-idf-tools").exists()
+
+
+def test_migrate_legacy_dirs_noop_when_nothing_to_migrate(monkeypatch, tmp_path):
+    old_data = tmp_path / "data"
+    old_data.mkdir()
+    monkeypatch.setattr(config, "DATA_DIR", old_data)
+    monkeypatch.setattr(config, "GFMT_FIRMWARE_DIR", tmp_path / "firmware")
+
+    esp_idf_provisioning.migrate_legacy_dirs()  # must not raise
+    assert (tmp_path / "firmware").exists() is False
+
+
+def test_migrate_legacy_dirs_deletes_leftover_when_dest_exists(monkeypatch, tmp_path):
+    old_data = tmp_path / "data"
+    fw = tmp_path / "firmware"
+    (old_data / "esp-idf-tools").mkdir(parents=True)
+    (fw / "esp-idf-tools").mkdir(parents=True)
+    monkeypatch.setattr(config, "DATA_DIR", old_data)
+    monkeypatch.setattr(config, "GFMT_FIRMWARE_DIR", fw)
+
+    esp_idf_provisioning.migrate_legacy_dirs()
+
+    assert not (old_data / "esp-idf-tools").exists()
+    assert (fw / "esp-idf-tools").exists()

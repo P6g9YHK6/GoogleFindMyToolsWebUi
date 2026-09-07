@@ -126,10 +126,21 @@ state the app already keeps, nothing new persisted).
 
 ## Data on disk
 
-Everything persisted lives flat in one directory (`GFMT_DATA_DIR`, `/data`
-in the Docker image): `auth.yaml` (credentials, optionally encrypted - see
-`Auth/token_cache.py`), `devices.yaml`, `config.yaml`, `forward.log`,
-`system.log`. No database - see the README's "Everything survives a
+Everything you'd want to back up lives flat in one directory (`GFMT_DATA_DIR`,
+`/data` in the Docker image): `auth.yaml` (credentials, optionally encrypted -
+see `Auth/token_cache.py`), `devices.yaml`, `config.yaml`, `forward.log`,
+`system.log`. The on-demand ESP-IDF toolchain (~2.5GB) and firmware-build
+sandboxes (`GFMT_FIRMWARE_DIR`, `/firmware` in Docker) are entirely
+rebuildable and deliberately kept outside `/data` - not mounted by default so
+a container replace wipes them, and an optional volume can keep them across
+replaces for repeat builders. Both are auto-reclaimed on startup:
+`GFMT_FIRMWARE_KEEP_BUILDS` + `GFMT_FIRMWARE_BUILD_TTL_S` bound the sandbox
+pile, and `GFMT_ESP_IDF_IDLE_TTL_S` removes a toolchain that hasn't been
+used in N days. A one-time migration in main.py's lifespan relays any
+pre-split leftovers still sitting under `DATA_DIR` (esp-idf/,
+esp-idf-tools/, firmware_builds/) into `GFMT_FIRMWARE_DIR` on upgrade, so an
+existing install is kept without a re-download and the backed-up volume sheds
+it. No database - see the README's "Everything survives a
 restart" feature bullet for why.
 
 ## Tests

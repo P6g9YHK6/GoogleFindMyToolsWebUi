@@ -22,6 +22,7 @@ import tempfile
 # Must happen before anything under webui/Auth is first imported - DATA_DIR/
 # secrets paths are computed once, at import time, from these env vars.
 os.environ["GFMT_DATA_DIR"] = tempfile.mkdtemp(prefix="gfmt-test-data-")
+os.environ["GFMT_FIRMWARE_DIR"] = tempfile.mkdtemp(prefix="gfmt-test-firmware-")
 os.environ["GFMT_SECRETS_DIR"] = tempfile.mkdtemp(prefix="gfmt-test-secrets-")
 os.environ["GFMT_NONINTERACTIVE"] = "1"
 # NovaApi/query_throttle.py's shared singleton is a real module-level global,

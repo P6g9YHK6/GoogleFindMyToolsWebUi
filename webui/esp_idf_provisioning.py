@@ -1,11 +1,13 @@
 """On-demand ESP-IDF toolchain provisioning: cloning the esp-idf source and
-installing its esp32/esp32-c3 toolchains into DATA_DIR, so `idf.py` builds
-work without baking the ~1-2GB toolchain into the Docker image itself (see
-docker/web/Dockerfile - it only has git, not ESP-IDF). Same on-demand-and-
-cached shape as webui/browser_stack.py's Chrome-for-Testing download, except
-cached under DATA_DIR (the volume mount) rather than the ephemeral runtime
-dir - re-fetching a toolchain this size on every container restart would be
-far too slow to redo per-attempt the way Chrome's cache is.
+installing its esp32/esp32-c3 toolchains into GFMT_FIRMWARE_DIR (see
+webui/config.py), so `idf.py` builds work without baking the ~1-2GB toolchain
+into the Docker image itself (see docker/web/Dockerfile - it only has git, not
+ESP-IDF). Same on-demand-and-cached shape as webui/browser_stack.py's Chrome-
+for-Testing download, but the cache is re-usable rather than per-attempt: it
+lives under /firmware in the container (separate from the persisted /data
+volume, and only mounted there if the user opts in - see docker-compose.yml),
+and cleanup_if_stale() reclaims it after GFMT_ESP_IDF_IDLE_TTL_S of disuse so
+an abandoned install doesn't hug ~2.5GB forever.
 
 Pure mechanics only, no idea of the build's own state machine or websocket -
 see webui/firmware_build.py, which calls into this and reports progress
@@ -19,6 +21,7 @@ import os
 import pathlib
 import re
 import shutil
+import time
 
 from webui import config
 from webui.progress import ProgressCallback, _no_progress
@@ -139,7 +142,9 @@ async def _run_git_clone(args: list[str], timeout: float, on_progress: ProgressC
 
 
 async def provision(on_progress: ProgressCallback = _no_progress):
+    cleanup_if_stale()
     if is_provisioned():
+        _mark_used()
         await on_progress("provisioning", "ESP-IDF already installed.", 15)
         return
 
@@ -176,7 +181,82 @@ async def provision(on_progress: ProgressCallback = _no_progress):
     )
 
     (tools_dir / _MARKER_NAME).write_text("")
+    _mark_used()
     await on_progress("provisioning", "ESP-IDF ready.", 15)
+
+
+def _mark_used():
+    """Records that the toolchain was just used by bumping the marker's mtime.
+    cleanup_if_stale() compares against this to decide whether the install has
+    gone idle long enough to reclaim - so a container that provisions once and
+    then builds regularly never gets swept out from under a live deployment."""
+    marker = _tools_dir() / _MARKER_NAME
+    try:
+        if marker.exists():
+            marker.touch()
+    except OSError:
+        logger.warning("Could not update ESP-IDF last-used marker", exc_info=True)
+
+
+# The directory the toolchain used to live in, before it moved out of the
+# backed-up DATA_DIR into GFMT_FIRMWARE_DIR (see webui/config.py).
+_LEGACY_TOOLCHAIN_DIRS = ("esp-idf", "esp-idf-tools")
+
+
+def migrate_legacy_dirs() -> None:
+    """One-time relocation for installs provisioned before the toolchain moved
+    out of DATA_DIR: a persistent volume from before that change still has
+    esp-idf/ and esp-idf-tools/ (~2.5GB deck) sitting in the directory we're
+    supposed to back up. Move them into GFMT_FIRMWARE_DIR on startup so an
+    upgrade keeps its existing install without re-downloading, and the volume
+    stops carrying a multi-GB, entirely-rebuildable install it was never meant
+    to hold. Runs before cleanups in main.py's lifespan. Delete (rather than
+    move) if a new install already exists under GFMT_FIRMWARE_DIR - the old
+    one is throwaway either way."""
+    for name in _LEGACY_TOOLCHAIN_DIRS:
+        _relocate_legacy(config.DATA_DIR / name, name)
+
+
+def _relocate_legacy(src: pathlib.Path, name: str) -> None:
+    dst = config.GFMT_FIRMWARE_DIR / name
+    if not src.exists() or src.resolve() == dst.resolve():
+        return
+    if dst.exists():
+        logger.info("Removing leftover %s at %s (already exists under %s)", name, src, dst)
+        shutil.rmtree(src, ignore_errors=True)
+        return
+    logger.info("Migrating %s from %s to %s", name, src, dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), str(dst))
+
+
+def cleanup_if_stale() -> bool:
+    """Deletes a provisioned but long-unused ESP-IDF install to reclaim space -
+    the whole ~2.5GB (source clone + toolchains) sits under GFMT_FIRMWARE_DIR
+    and is entirely rebuildable at the next build via the marker-based
+    is_provisioned() check. Only reclaims if the install is older than
+    GFMT_ESP_IDF_IDLE_TTL_S (0 disables this entirely). Returns True if it
+    deleted something. Called at app startup (webui/main.py) and defensively
+    at the top of provision()."""
+    ttl_s = config.GFMT_ESP_IDF_IDLE_TTL_S
+    if ttl_s <= 0:
+        return False
+    idf_dir = _idf_dir()
+    tools_dir = _tools_dir()
+    marker = tools_dir / _MARKER_NAME
+    if not (is_provisioned() if idf_dir.exists() else False):
+        return False
+    try:
+        marker_mtime = marker.stat().st_mtime
+    except OSError:
+        return False
+    if time.time() - marker_mtime <= ttl_s:
+        return False
+
+    logger.info("Reclaiming ESP-IDF toolchain idle for %ds (TTL %ds)", time.time() - marker_mtime, ttl_s)
+    shutil.rmtree(idf_dir, ignore_errors=True)
+    shutil.rmtree(tools_dir, ignore_errors=True)
+    return True
 
 
 async def get_env() -> dict:
