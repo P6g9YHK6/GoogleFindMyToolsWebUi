@@ -1,5 +1,13 @@
+import asyncio
+import ssl
+
 import Auth.firebase_messaging.fcmpushclient as fcmpushclient_module
-from Auth.firebase_messaging.fcmpushclient import FcmPushClient, FcmRegisterConfig
+from Auth.firebase_messaging.fcmpushclient import (
+    ErrorType,
+    FcmPushClient,
+    FcmPushClientRunState,
+    FcmRegisterConfig,
+)
 
 
 def _make_client() -> FcmPushClient:
@@ -56,3 +64,78 @@ async def test_checkin_or_register_closes_session_even_on_failure(monkeypatch):
         raise AssertionError("expected the simulated checkin failure to propagate")
 
     assert closed == [True], "FcmRegister.close() must run even when checkin_or_register() raises"
+
+
+class _BenignCloseReader:
+    """A fake StreamReader that raises the TLS close-race SSLError exactly
+    once, then blocks forever so _listen does not spin after handling it."""
+
+    def __init__(self) -> None:
+        self.raised = False
+
+    async def readexactly(self, n: int) -> bytes:
+        if not self.raised:
+            self.raised = True
+            err = ssl.SSLError(
+                1, "[SSL: APPLICATION_DATA_AFTER_CLOSE_NOTIFY] application data after close notify"
+            )
+            err.reason = "APPLICATION_DATA_AFTER_CLOSE_NOTIFY"
+            raise err
+        await asyncio.Event().wait()
+        raise AssertionError("should never reach here")
+
+
+async def test_benign_ssl_close_notify_reconnects_without_abort(monkeypatch):
+    """Google's MCS server sometimes sends close_notify and then a little
+    more application data while we are already tearing the connection down,
+    surfacing as SSLError 'APPLICATION_DATA_AFTER_CLOSE_NOTIFY'. When that
+    read error arrives after run_state has moved past RESETTING it used to
+    fall through to the unexpected-error branch and count toward the
+    3-strike shutdown ("Shutting down push receiver due to 3 sequential
+    errors of type ErrorType.CONNECTION"). It should instead reconnect via
+    _reset() without advancing the abort counter."""
+
+    async def fake_connect_with_retry(self) -> bool:
+        return True
+
+    async def fake_login(self) -> None:
+        self.run_state = FcmPushClientRunState.STARTED
+
+    monkeypatch.setattr(
+        fcmpushclient_module.FcmPushClient,
+        "_connect_with_retry",
+        fake_connect_with_retry,
+    )
+    monkeypatch.setattr(
+        fcmpushclient_module.FcmPushClient, "_login", fake_login
+    )
+
+    client = _make_client()
+    client.config.reset_interval = 0
+    client.reset_lock = asyncio.Lock()
+    client.stopping_lock = asyncio.Lock()
+    client.do_listen = True
+    client.run_state = FcmPushClientRunState.STARTED  # deliberately NOT RESETTING
+    client.first_message = False
+    client.reader = _BenignCloseReader()
+    client.writer = None
+
+    resets: list[bool] = []
+
+    async def fake_reset(self) -> None:
+        resets.append(True)
+
+    monkeypatch.setattr(fcmpushclient_module.FcmPushClient, "_reset", fake_reset)
+
+    task = asyncio.create_task(client._listen())
+    await asyncio.sleep(0.1)
+    task.cancel()
+    try:
+        await task
+    except (asyncio.CancelledError, Exception):
+        pass
+
+    assert resets == [True], "benign close-notify error must trigger a reconnect"
+    assert (
+        client.sequential_error_counters.get(ErrorType.CONNECTION, 0) == 0
+    ), "benign close-notify error must not advance the abort counter"

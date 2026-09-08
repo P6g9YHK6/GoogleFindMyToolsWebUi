@@ -783,6 +783,27 @@ class FcmPushClient:  # pylint:disable=too-many-instance-attributes
                                 "Expected read error during reset: %s",
                                 type(osex).__name__,
                             )
+                    elif (
+                        isinstance(osex, ssl.SSLError)  # pylint: disable=no-member
+                        and osex.reason == "APPLICATION_DATA_AFTER_CLOSE_NOTIFY"
+                    ):
+                        # TLS close race. Google's server sends close_notify and
+                        # then a little more application data while we are already
+                        # tearing the connection down, which surfaces here as
+                        # "application data after close notify". It is benign
+                        # (see python/cpython#84132) and frequently arrives after
+                        # run_state has moved past RESETTING, so it used to fall
+                        # through to the unexpected-error branch and count toward
+                        # the 3-strike shutdown ("Shutting down push receiver
+                        # due to 3 sequential errors"). Reconnect instead without
+                        # advancing the abort counter.
+                        _logger.info(
+                            "Benign TLS close notification error (%s), "
+                            "reconnecting",
+                            osex.reason,
+                        )
+                        self._reset_error_count(ErrorType.CONNECTION)
+                        await self._reset()
                     else:
                         _logger.exception("Unexpected exception during read\n")
                         if self._try_increment_error_count(ErrorType.CONNECTION):
