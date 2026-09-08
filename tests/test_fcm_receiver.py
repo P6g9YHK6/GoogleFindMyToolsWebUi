@@ -132,3 +132,60 @@ def test_get_android_id_only_guards_when_credentials_are_missing(receiver, monke
     receiver.credentials = {"gcm": {"android_id": "cached-id"}}
     assert receiver.get_android_id() == "cached-id"
     assert calls == [1]  # unchanged - already-known credentials skip the guard entirely
+
+
+def test_concurrent_creation_waits_for_full_init(monkeypatch):
+    """Regression test for "'FcmReceiver' object has no attribute
+    '_start_lock'". __new__ publishes the singleton to _instance before
+    __init__ finishes, and __init__ used to set _initialized=True first and
+    then do slow work (file reads, FcmPushClient construction) before ever
+    creating _start_lock. A second thread calling FcmReceiver() in that
+    window - e.g. two devices' locates landing together right after a
+    restart or a "Clear credentials" - grabbed the half-built instance,
+    early-returned from __init__, and blew up on `with self._start_lock` in
+    _ensure_listening."""
+    from Auth import fcm_receiver as fcm_receiver_module
+
+    entered_init = threading.Event()
+    release_init = threading.Event()
+
+    def slow_get_cached_value(name):
+        entered_init.set()
+        release_init.wait(timeout=2)
+        return {"gcm": {"android_id": "abc123"}}
+
+    monkeypatch.setattr(fcm_receiver_module, "get_cached_value", slow_get_cached_value)
+    monkeypatch.setattr(fcm_receiver_module.FcmPushClient, "__init__", lambda self, *a, **kw: None)
+    # Keep _ensure_listening from going deeper than the _start_lock guard on
+    # the second caller - this test is about the lock existing at all.
+    monkeypatch.setattr(fcm_receiver_module.FcmReceiver, "_listener_dead", lambda self: False)
+    fcm_receiver_module.FcmReceiver._listening = True
+
+    fcm_receiver_module.FcmReceiver._instance = None
+
+    t1 = threading.Thread(target=fcm_receiver_module.FcmReceiver)
+    t1.start()
+    assert entered_init.wait(timeout=2)  # t1 is mid-init, _start_lock not yet created
+
+    errors = []
+
+    def second_caller():
+        try:
+            r = fcm_receiver_module.FcmReceiver()
+            r._ensure_listening()
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    t2 = threading.Thread(target=second_caller)
+    t2.start()
+    time.sleep(0.1)
+    assert not errors, f"second caller must block, not fail, while init is running: {errors}"
+
+    release_init.set()
+    t1.join(timeout=2)
+    t2.join(timeout=2)
+
+    assert not errors, f"second caller must work once init has finished: {errors}"
+
+    fcm_receiver_module.FcmReceiver._instance = None
+    fcm_receiver_module.FcmReceiver._listening = False

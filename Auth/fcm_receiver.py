@@ -17,42 +17,68 @@ class FcmReceiver:
     _loop = None
     _loop_thread = None
     _MAX_RETRY_DELAY_S = 60
+    # Serializes singleton creation AND the full __init__ body. __new__ alone
+    # isn't enough: it publishes the instance to _instance before __init__ has
+    # run, and __init__ used to set _initialized=True first and then do slow
+    # work (file reads, FcmPushClient construction) before reaching line 54 -
+    # so a concurrent FcmReceiver() call from another thread (e.g. two
+    # devices' locates landing together right after restart) grabbed the
+    # half-built instance, early-returned from __init__, and blew up with
+    # "no attribute '_start_lock'" in _ensure_listening.
+    _creation_lock = threading.Lock()
 
     def __new__(cls, *args, **kwargs):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls, *args, **kwargs)
+        with cls._creation_lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls, *args, **kwargs)
         return cls._instance
 
     def __init__(self):
-        if hasattr(self, '_initialized') and self._initialized:
-            return
-        self._initialized = True
+        with FcmReceiver._creation_lock:
+            if getattr(self, '_initialized', False):
+                return
 
-        # Define Firebase project configuration
-        project_id = "google.com:api-project-289722593072"
-        app_id = "1:289722593072:android:3cfcf5bc359f0308"
-        api_key = "AIzaSyD_gko3P392v6how2H7UpdeXQ0v2HLettc"
-        message_sender_id = "289722593072"
+            # _start_lock is created before anything slow. The bug this guards
+            # against: __new__ publishes the instance to _instance before
+            # __init__ finishes, so a concurrent caller (e.g. two devices'
+            # locates landing together right after restart) used to grab the
+            # half-built singleton, early-return from __init__, and blow up
+            # with "'FcmReceiver' object has no attribute '_start_lock'" in
+            # _ensure_listening.
+            self.location_update_callbacks = []
+            self._callbacks_lock = threading.Lock()
+            self._start_lock = threading.Lock()
 
-        # APK signing certificate SHA1
-        android_cert_sha1 = "38918a453d07199354f8b19af05ec6562ced5788"
-        bundle_id = "com.google.android.apps.adm"
+            # Define Firebase project configuration
+            project_id = "google.com:api-project-289722593072"
+            app_id = "1:289722593072:android:3cfcf5bc359f0308"
+            api_key = "AIzaSyD_gko3P392v6how2H7UpdeXQ0v2HLettc"
+            message_sender_id = "289722593072"
 
-        fcm_config = FcmRegisterConfig(
-            project_id=project_id,
-            app_id=app_id,
-            api_key=api_key,
-            messaging_sender_id=message_sender_id,
-            bundle_id=bundle_id,
-            android_package=bundle_id,
-            android_cert_sha1=android_cert_sha1
-        )
+            # APK signing certificate SHA1
+            android_cert_sha1 = "38918a453d07199354f8b19af05ec6562ced5788"
+            bundle_id = "com.google.android.apps.adm"
 
-        self.credentials = get_cached_value('fcm_credentials')
-        self.location_update_callbacks = []
-        self._callbacks_lock = threading.Lock()
-        self._start_lock = threading.Lock()
-        self.pc = FcmPushClient(self._on_notification, fcm_config, self.credentials, self._on_credentials_updated)
+            fcm_config = FcmRegisterConfig(
+                project_id=project_id,
+                app_id=app_id,
+                api_key=api_key,
+                messaging_sender_id=message_sender_id,
+                bundle_id=bundle_id,
+                android_package=bundle_id,
+                android_cert_sha1=android_cert_sha1
+            )
+
+            self.credentials = get_cached_value('fcm_credentials')
+            self.pc = FcmPushClient(
+                self._on_notification, fcm_config, self.credentials, self._on_credentials_updated
+            )
+
+            # _initialized marks the object fully-constructed: if __init__
+            # raises mid-way the exception propagates to the caller and the
+            # next FcmReceiver() retries from scratch instead of keeping a
+            # broken singleton whose guard skips __init__ forever.
+            self._initialized = True
 
 
     def _listener_dead(self) -> bool:
@@ -125,8 +151,9 @@ class FcmReceiver:
         reads the cache once (at first instantiation) and this instance would
         keep silently serving its old in-memory self.credentials forever,
         never noticing the file changed underneath it."""
-        self.stop_listening()
-        FcmReceiver._instance = None
+        with FcmReceiver._creation_lock:
+            self.stop_listening()
+            FcmReceiver._instance = None
 
 
     def get_android_id(self):
