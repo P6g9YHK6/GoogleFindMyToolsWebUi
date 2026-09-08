@@ -797,13 +797,27 @@ class FcmPushClient:  # pylint:disable=too-many-instance-attributes
                         # the 3-strike shutdown ("Shutting down push receiver
                         # due to 3 sequential errors"). Reconnect instead without
                         # advancing the abort counter.
-                        _logger.info(
-                            "Benign TLS close notification error (%s), "
-                            "reconnecting",
-                            osex.reason,
-                        )
                         self._reset_error_count(ErrorType.CONNECTION)
-                        await self._reset()
+                        if self.reset_lock.locked():
+                            # Another reset is already running and self.reader
+                            # is stale, so _reset() would just no-op and send
+                            # us straight back into an instant read/instant-
+                            # error busy-spin. Wait on the lock instead.
+                            _logger.info(
+                                "Benign TLS close notification error (%s) "
+                                "while a reset is already in progress, "
+                                "waiting for it to finish",
+                                osex.reason,
+                            )
+                            async with self.reset_lock:
+                                pass
+                        else:
+                            _logger.info(
+                                "Benign TLS close notification error (%s), "
+                                "reconnecting",
+                                osex.reason,
+                            )
+                            await self._reset()
                     else:
                         _logger.exception("Unexpected exception during read\n")
                         if self._try_increment_error_count(ErrorType.CONNECTION):

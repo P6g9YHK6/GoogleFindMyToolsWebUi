@@ -139,3 +139,74 @@ async def test_benign_ssl_close_notify_reconnects_without_abort(monkeypatch):
     assert (
         client.sequential_error_counters.get(ErrorType.CONNECTION, 0) == 0
     ), "benign close-notify error must not advance the abort counter"
+
+
+class _AlwaysBenignCloseReader:
+    """A fake StreamReader that raises the TLS close-race SSLError on every
+    read, like a real one with the exception already cached on it."""
+
+    def __init__(self) -> None:
+        self.read_count = 0
+
+    async def readexactly(self, n: int) -> bytes:
+        self.read_count += 1
+        err = ssl.SSLError(
+            1, "[SSL: APPLICATION_DATA_AFTER_CLOSE_NOTIFY] application data after close notify"
+        )
+        err.reason = "APPLICATION_DATA_AFTER_CLOSE_NOTIFY"
+        raise err
+
+
+async def test_benign_ssl_close_notify_waits_instead_of_busy_spinning_when_reset_in_progress(
+    monkeypatch,
+):
+    """When a reset is already in progress elsewhere and self.reader is
+    stale, hitting the benign TLS close-race error must wait on reset_lock
+    instead of looping instant read/instant-error (the busy-spin that used
+    to flood the log and starve the event loop, causing locate timeouts)."""
+
+    reset_calls: list[bool] = []
+
+    async def fake_connect_with_retry(self) -> bool:
+        return True
+
+    async def fake_login(self) -> None:
+        self.run_state = FcmPushClientRunState.STARTED
+
+    async def fake_reset(self) -> None:
+        reset_calls.append(True)
+
+    monkeypatch.setattr(
+        fcmpushclient_module.FcmPushClient, "_connect_with_retry", fake_connect_with_retry
+    )
+    monkeypatch.setattr(fcmpushclient_module.FcmPushClient, "_login", fake_login)
+    monkeypatch.setattr(fcmpushclient_module.FcmPushClient, "_reset", fake_reset)
+
+    client = _make_client()
+    client.config.reset_interval = 0
+    client.reset_lock = asyncio.Lock()
+    client.stopping_lock = asyncio.Lock()
+    client.do_listen = True
+    client.run_state = FcmPushClientRunState.STARTED  # deliberately NOT RESETTING
+    client.first_message = False
+    reader = _AlwaysBenignCloseReader()
+    client.reader = reader
+    client.writer = None
+
+    # Simulate another task (e.g. _do_monitor's heartbeat check) already
+    # resetting the connection - reset_lock stays held for the whole test.
+    await client.reset_lock.acquire()
+
+    task = asyncio.create_task(client._listen())
+    await asyncio.sleep(0.05)
+    task.cancel()
+    try:
+        await task
+    except (asyncio.CancelledError, Exception):
+        pass
+
+    assert reader.read_count == 1, (
+        "read loop busy-spun instead of waiting for the in-progress reset: "
+        f"readexactly() was called {reader.read_count} times in 50ms"
+    )
+    assert reset_calls == [], "must not call _reset() again while a reset is already in progress"
