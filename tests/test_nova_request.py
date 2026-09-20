@@ -1,5 +1,5 @@
-import requests
 import pytest
+import requests
 
 from NovaApi import nova_request as nova_request_module
 from NovaApi.nova_request import nova_request
