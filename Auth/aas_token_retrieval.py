@@ -7,6 +7,7 @@ import logging
 import time
 
 import gpsoauth
+import requests
 
 from Auth.auth_flow import request_oauth_account_token_flow
 from Auth.fcm_receiver import FcmReceiver
@@ -27,7 +28,19 @@ def _generate_aas_token():
 
     attempt = 0
     while True:
-        aas_token_response = gpsoauth.exchange_token(username, token, android_id)
+        try:
+            aas_token_response = gpsoauth.exchange_token(username, token, android_id)
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as ex:
+            if attempt >= TOKEN_EXCHANGE_RETRIES:
+                raise
+            attempt += 1
+            logger.info(
+                "Google's token exchange endpoint hit a transient network "
+                "error (%s), retrying (%s/%s)",
+                ex, attempt, TOKEN_EXCHANGE_RETRIES,
+            )
+            time.sleep(TOKEN_EXCHANGE_RETRY_BACKOFF_S)
+            continue
 
         if 'Token' in aas_token_response:
             break

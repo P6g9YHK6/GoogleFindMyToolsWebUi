@@ -7,6 +7,7 @@ import logging
 import time
 
 import gpsoauth
+import requests
 
 from Auth.aas_token_retrieval import get_aas_token
 from Auth.fcm_receiver import FcmReceiver
@@ -26,11 +27,23 @@ def request_token(username, scope, play_services = False):
 
     attempt = 0
     while True:
-        auth_response = gpsoauth.perform_oauth(
-            username, aas_token, android_id,
-            service='oauth2:https://www.googleapis.com/auth/' + scope,
-            app=request_app,
-            client_sig='38918a453d07199354f8b19af05ec6562ced5788')
+        try:
+            auth_response = gpsoauth.perform_oauth(
+                username, aas_token, android_id,
+                service='oauth2:https://www.googleapis.com/auth/' + scope,
+                app=request_app,
+                client_sig='38918a453d07199354f8b19af05ec6562ced5788')
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as ex:
+            if attempt >= TOKEN_REQUEST_RETRIES:
+                raise
+            attempt += 1
+            logger.info(
+                "Google's sign-in endpoint hit a transient network error "
+                "(%s) for scope '%s', retrying (%s/%s)",
+                ex, scope, attempt, TOKEN_REQUEST_RETRIES,
+            )
+            time.sleep(TOKEN_REQUEST_RETRY_BACKOFF_S)
+            continue
 
         if 'Auth' in auth_response:
             return auth_response['Auth']

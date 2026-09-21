@@ -1,4 +1,5 @@
 import pytest
+import requests
 
 from Auth import token_retrieval as token_retrieval_module
 from Auth.token_retrieval import request_token
@@ -62,3 +63,33 @@ def test_request_token_raises_clear_error_after_exhausting_retries(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="transient error"):
         request_token("user@example.com", "someScope")
+
+
+def test_request_token_retries_transient_connection_error_then_succeeds(monkeypatch):
+    calls = []
+
+    def fake_perform_oauth(*a, **kw):
+        calls.append(1)
+        if len(calls) < 3:
+            raise requests.exceptions.ConnectionError(
+                "('Connection aborted.', RemoteDisconnected('Remote end closed "
+                "connection without response'))"
+            )
+        return {"Auth": "the-token"}
+
+    monkeypatch.setattr(token_retrieval_module.gpsoauth, "perform_oauth", fake_perform_oauth)
+    assert request_token("user@example.com", "someScope") == "the-token"
+    assert len(calls) == 3
+
+
+def test_request_token_raises_after_exhausting_connection_error_retries(monkeypatch):
+    calls = []
+
+    def fake_perform_oauth(*a, **kw):
+        calls.append(1)
+        raise requests.exceptions.ConnectionError("boom")
+
+    monkeypatch.setattr(token_retrieval_module.gpsoauth, "perform_oauth", fake_perform_oauth)
+    with pytest.raises(requests.exceptions.ConnectionError):
+        request_token("user@example.com", "someScope")
+    assert len(calls) == token_retrieval_module.TOKEN_REQUEST_RETRIES + 1

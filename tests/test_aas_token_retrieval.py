@@ -1,4 +1,5 @@
 import pytest
+import requests
 
 from Auth import aas_token_retrieval as aas_token_retrieval_module
 from Auth.aas_token_retrieval import _generate_aas_token
@@ -80,3 +81,33 @@ def test_generate_aas_token_raises_clear_error_after_exhausting_retries(monkeypa
     )
     with pytest.raises(RuntimeError, match="transient"):
         _generate_aas_token()
+
+
+def test_generate_aas_token_retries_transient_connection_error_then_succeeds(monkeypatch):
+    calls = []
+
+    def fake_exchange_token(*a, **kw):
+        calls.append(1)
+        if len(calls) < 3:
+            raise requests.exceptions.ConnectionError(
+                "('Connection aborted.', RemoteDisconnected('Remote end closed "
+                "connection without response'))"
+            )
+        return {"Token": "the-aas-token"}
+
+    monkeypatch.setattr(aas_token_retrieval_module.gpsoauth, "exchange_token", fake_exchange_token)
+    assert _generate_aas_token() == "the-aas-token"
+    assert len(calls) == 3
+
+
+def test_generate_aas_token_raises_after_exhausting_connection_error_retries(monkeypatch):
+    calls = []
+
+    def fake_exchange_token(*a, **kw):
+        calls.append(1)
+        raise requests.exceptions.ConnectionError("boom")
+
+    monkeypatch.setattr(aas_token_retrieval_module.gpsoauth, "exchange_token", fake_exchange_token)
+    with pytest.raises(requests.exceptions.ConnectionError):
+        _generate_aas_token()
+    assert len(calls) == aas_token_retrieval_module.TOKEN_EXCHANGE_RETRIES + 1
