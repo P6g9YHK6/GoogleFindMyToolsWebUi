@@ -20,19 +20,24 @@ _TOKEN_RE = re.compile(r"\{\{(\w+)\}\}")
 
 
 def _render(template: str, ctx: dict) -> str:
-    """Substitutes {{name}} tokens from ctx. An unresolved token (e.g. a
-    typo) is left in place rather than dropped, so a bad template is obvious
-    in the request itself. A token that resolves to an empty string logs a
-    warning instead - easy to miss otherwise, since nothing looks broken."""
+    """Substitutes {{name}} tokens from ctx. A token ctx has never heard of
+    (e.g. a typo) is left in place rather than dropped, so a bad template is
+    obvious in the request itself. A *known* variable that's simply unset for
+    this reading (e.g. {{altitude_m}} on a SEMANTIC/named-location fix, which
+    carries no altitude) resolves to "" instead - leaving the literal
+    "{{altitude_m}}" in a sent URL/body isn't a visible typo, it's a string
+    some destinations (e.g. Traccar's OsmAnd decoder) then fail to parse as a
+    number. Either way a token that resolves to "" logs a warning, since
+    otherwise nothing looks broken."""
     if not template:
         return ""
 
     def repl(m: re.Match) -> str:
         key = m.group(1)
-        value = ctx.get(key)
-        if value is None:
+        if key not in ctx:
             return m.group(0)
-        rendered = str(value)
+        value = ctx[key]
+        rendered = "" if value is None else str(value)
         if rendered == "":
             logger.warning("Template variable {{%s}} resolved to an empty value", key)
         return rendered

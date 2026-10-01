@@ -67,6 +67,20 @@ def test_phonetrack_owntracks_and_overland_presets_render_to_valid_json():
         assert rendered  # parses and isn't empty
 
 
+def test_traccar_preset_renders_a_parseable_url_for_a_named_location_with_no_altitude():
+    """A semantic-map-mapped SEMANTIC reading (see semantic_map.py) has
+    coordinates but no altitude. The rendered URL must not contain the
+    literal "{{altitude_m}}" - Traccar's OsmAnd decoder tries to parse
+    whatever's there as a number and drops the whole point if it can't."""
+    from webui.forwarders.custom import _render, build_context
+
+    location = {"latitude": 47.1, "longitude": 8.5, "altitude": None, "accuracy": 10.0, "time": 1700000000}
+    ctx = build_context({}, location, "MyPhone")
+    url = _render(PRESETS["traccar"]["url"], ctx)
+    assert "altitude_m" not in url
+    assert "altitude=&" in url or url.endswith("altitude=")
+
+
 def test_blank_endpoint_starts_from_the_custom_preset():
     blank = blank_endpoint("*/5 * * * *")
     assert blank["cron"] == "*/5 * * * *"
@@ -589,6 +603,17 @@ def test_render_does_not_warn_on_unresolved_or_nonempty_tokens(caplog):
         result = _render("a={{typo}}&b={{ok}}", {"ok": "value"})
     assert result == "a={{typo}}&b=value"
     assert caplog.records == []
+
+
+def test_render_blanks_a_known_variable_that_is_unset_instead_of_leaving_the_token():
+    """A SEMANTIC/named-location fix carries no altitude, so {{altitude_m}}
+    resolves to None in ctx - unlike a typo'd token, it must come out as ""
+    rather than the literal "{{altitude_m}}", which e.g. Traccar's OsmAnd
+    decoder can't parse as a number and rejects the whole request over."""
+    from webui.forwarders.custom import _render
+
+    result = _render("alt={{altitude_m}}&lat={{latitude}}", {"altitude_m": None, "latitude": 1.0})
+    assert result == "alt=&lat=1.0"
 
 
 def test_forward_to_custom_skips_semantic_and_missing_coordinates():
