@@ -32,12 +32,12 @@ _SEMANTIC_MATCH_MODES = ("full", "partial")
 def _to_semantic_map(value) -> dict:
     """Used as an _APP_SETTINGS_SCHEMA caster for the YAML-edit path - see
     _parse_semantic_map_form for the structured-form equivalent. Expects
-    {name: {"latitude": ..., "longitude": ..., "match_mode": "full"|
-    "partial"}}; raises (caught by _validate_app_settings, same as every
-    other caster here) on anything else, including a name with no
-    coordinates, a non-numeric one, or an unrecognized match_mode.
-    match_mode itself is optional and defaults to "full" - entries saved
-    before this field existed still validate."""
+    {name: {"latitude": ..., "longitude": ..., "altitude": ... (optional),
+    "match_mode": "full"|"partial"}}; raises (caught by
+    _validate_app_settings, same as every other caster here) on anything
+    else, including a name with no coordinates, a non-numeric one, or an
+    unrecognized match_mode. match_mode defaults to "full" and altitude to
+    absent - entries saved before either field existed still validate."""
     if not isinstance(value, dict):
         raise TypeError("not a mapping")
     result = {}
@@ -49,43 +49,57 @@ def _to_semantic_map(value) -> dict:
         match_mode = coords.get("match_mode", "full")
         if match_mode not in _SEMANTIC_MATCH_MODES:
             raise ValueError(f"match_mode must be one of {_SEMANTIC_MATCH_MODES}")
-        result[name] = {
+        entry = {
             "latitude": float(coords["latitude"]),
             "longitude": float(coords["longitude"]),
             "match_mode": match_mode,
         }
+        altitude = coords.get("altitude")
+        if altitude is not None:
+            entry["altitude"] = float(altitude)
+        result[name] = entry
     return result
 
 
 def _parse_semantic_map_form(form) -> dict:
     """Structured-form equivalent of _to_semantic_map above - reads the
-    semantic_name[]/semantic_lat[]/semantic_lon[]/semantic_match_mode[]
-    quadruples posted by the "Semantic location mapping" table (see
-    auth/_app_settings.html), same parallel-list convention as
-    webui/forwarders/settings_service.py's parse_kv_rows for endpoint
-    headers. A row with a blank name or a non-numeric lat/lon is silently
-    dropped rather than rejecting the whole save - the same "just skip a
-    genuinely empty row" leniency an unchecked checkbox or blank text field
-    gets elsewhere on this form. An unrecognized/missing match_mode falls
-    back to "full" instead of dropping the row - coordinates are what make
-    a row valid, not the match type."""
+    semantic_name[]/semantic_lat[]/semantic_lon[]/semantic_alt[]/
+    semantic_match_mode[] quintuples posted by the "Semantic location
+    mapping" table (see auth/_app_settings.html), same parallel-list
+    convention as webui/forwarders/settings_service.py's parse_kv_rows for
+    endpoint headers. A row with a blank name or a non-numeric lat/lon is
+    silently dropped rather than rejecting the whole save - the same "just
+    skip a genuinely empty row" leniency an unchecked checkbox or blank text
+    field gets elsewhere on this form. An unrecognized/missing match_mode
+    falls back to "full" instead of dropping the row - coordinates are what
+    make a row valid, not the match type. altitude is optional - left blank,
+    the row still saves, just with no altitude (same as before this field
+    existed); a non-numeric value is dropped rather than the whole row."""
     names = form.getlist("semantic_name")
     lats = form.getlist("semantic_lat")
     lons = form.getlist("semantic_lon")
+    alts = form.getlist("semantic_alt")
     match_modes = form.getlist("semantic_match_mode")
     result = {}
-    for name, lat, lon, match_mode in zip_longest(names, lats, lons, match_modes, fillvalue=""):
+    for name, lat, lon, alt, match_mode in zip_longest(names, lats, lons, alts, match_modes, fillvalue=""):
         name = name.strip()
         if not name:
             continue
         try:
-            result[name] = {
+            entry = {
                 "latitude": float(lat),
                 "longitude": float(lon),
                 "match_mode": match_mode if match_mode in _SEMANTIC_MATCH_MODES else "full",
             }
         except (TypeError, ValueError):
             continue
+        alt = alt.strip()
+        if alt:
+            try:
+                entry["altitude"] = float(alt)
+            except ValueError:
+                pass
+        result[name] = entry
     return result
 
 

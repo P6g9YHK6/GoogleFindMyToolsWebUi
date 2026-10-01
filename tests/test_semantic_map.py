@@ -49,6 +49,15 @@ def test_matching_semantic_name_gets_mapped_coordinates():
     assert result["is_own_report"] is True
 
 
+def test_matching_semantic_name_carries_over_a_configured_altitude():
+    location = _semantic("Nest Mini - Living Room")
+    mapping = {"Nest Mini - Living Room": {"latitude": 45.0, "longitude": 9.0, "altitude": 120.0}}
+
+    [result] = semantic_map.apply_semantic_mapping([location], mapping)
+
+    assert result["altitude"] == 120.0
+
+
 def test_non_matching_semantic_name_passes_through_unchanged():
     location = _semantic("Unmapped Place")
     mapping = {"Nest Mini - Living Room": {"latitude": 45.0, "longitude": 9.0}}

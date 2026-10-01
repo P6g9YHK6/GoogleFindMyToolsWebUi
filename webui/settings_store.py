@@ -40,9 +40,10 @@ def _defaults() -> dict:
         # webui/forwarders/semantic_map.py). Global rather than per-device:
         # a named smart-home device's position doesn't change depending on
         # which tracker reports being near it. {name: {"latitude": float,
-        # "longitude": float, "match_mode": "full"|"partial"}}. match_mode
-        # defaults to "full" (exact match) when absent, so entries saved
-        # before this field existed keep behaving the same way.
+        # "longitude": float, "altitude": float (optional),
+        # "match_mode": "full"|"partial"}}. match_mode defaults to "full"
+        # (exact match) when absent, altitude to None, so entries saved
+        # before either field existed keep behaving the same way.
         "semantic_location_map": {},
     }
 

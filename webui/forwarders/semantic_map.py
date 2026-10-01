@@ -45,7 +45,9 @@ def apply_semantic_mapping(locations: list[dict], mapping: dict) -> list[dict]:
             **location,
             "latitude": latitude,
             "longitude": longitude,
-            "altitude": None,
+            # Optional - a mapping entry saved before this field existed (or
+            # one left blank) has no altitude, same as before.
+            "altitude": coords.get("altitude"),
             "map_links": create_map_links(latitude, longitude),
         })
     return mapped
