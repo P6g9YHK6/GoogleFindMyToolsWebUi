@@ -1,7 +1,18 @@
 {% extends "base.html" %}
 {% block title %}Devices - GoogleFindMyToolsWebUi{% endblock %}
 {% block content %}
-<h1>Devices</h1>
+<div class="page-head">
+  <h1>Devices</h1>
+  {# The account's device list is cached for a day (see
+     webui/device_list_cache.py) so a normal visit never re-queries Google -
+     this is the manual bypass, same target/swap as the page's own initial
+     load below. #}
+  <button type="button" class="btn-secondary" hx-post="/devices/refresh"
+          hx-target="#device-table" hx-swap="innerHTML" hx-indicator="#devices-refresh-spinner">
+    <svg class="icon icon-sm"><use href="#i-refresh"/></svg> Refresh device list
+  </button>
+  <span id="devices-refresh-spinner" class="action-spinner htmx-indicator" aria-hidden="true"></span>
+</div>
 <div id="device-table" hx-get="/devices/table" hx-trigger="load" hx-swap="innerHTML">
   Loading...
 </div>
@@ -13,7 +24,7 @@
    <dialog> handles the centered layout, the dimmed ::backdrop (styled in
    app.css), and Escape-to-close for free. #}
 <dialog id="device-image-modal" class="image-modal">
-  <button type="button" class="btn-icon image-modal-close" aria-label="Close">✕</button>
+  <button type="button" class="btn-icon image-modal-close" aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
   <img class="image-modal-img" alt="">
   <p class="image-modal-caption"></p>
 </dialog>

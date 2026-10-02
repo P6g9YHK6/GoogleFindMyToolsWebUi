@@ -132,6 +132,32 @@ def compute_status(canonic_id: str, staleness_cfg: dict, now: float | None = Non
     }
 
 
+# Display-only freshness threshold for the Devices page's Fresh/Stale chip -
+# deliberately separate from DURATION_PRESETS/threshold_s above, which are
+# this device's own *alerting* threshold and stay unset (staleness tracking
+# is opt-in, off by default - see default_staleness) for most devices.
+DEFAULT_DISPLAY_THRESHOLD_S = 24 * 3600
+
+
+def display_status(canonic_id: str, staleness_cfg: dict | None, now: float | None = None) -> dict:
+    """A quiet, always-on freshness read for the Devices page - how old is
+    the newest ping, regardless of whether this device has staleness
+    alerting configured at all. Deliberately NOT compute_status(): that
+    function only ever reports "stale" for a device with alerting opted in
+    (enabled=True), so reusing it unmodified here would show every
+    never-configured device as permanently "fresh" - actively misleading on
+    a chip meant to always reflect the real fix age. Shares
+    _newest_fix_time with compute_status so the two can never disagree about
+    what counts as the newest fix."""
+    now = time.time() if now is None else now
+    last_fix_time = _newest_fix_time(canonic_id)
+    if last_fix_time is None:
+        return {"state": "unknown", "age_s": None}
+    threshold_s = (staleness_cfg or {}).get("threshold_s") or DEFAULT_DISPLAY_THRESHOLD_S
+    age_s = now - last_fix_time
+    return {"state": "stale" if age_s > threshold_s else "fresh", "age_s": age_s}
+
+
 def _alert_context(canonic_id: str, name: str, alias: str, status: dict) -> dict:
     return {
         "device_name": name or "",

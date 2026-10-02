@@ -115,44 +115,6 @@ def test_app_settings_round_trip(client, tmp_path, monkeypatch):
                 logging.getLogger("webui").removeHandler(handler)
 
 
-def test_app_settings_devices_page_most_recent_only_round_trips(client, tmp_path, monkeypatch):
-    """Unlike the endpoint-level toggles (webui/forwarders/policy.py), this
-    is a plain non-htmx checkbox - Form(False) is what correctly resolves
-    "checkbox not posted at all" to off (see routers/auth.py's
-    save_app_settings)."""
-    from webui import config, notify, settings_store
-
-    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(config, "APP_SETTINGS_PATH", tmp_path / "config.yaml")
-
-    class FakeApprise:
-        def add(self, url):
-            return True
-
-    monkeypatch.setattr(notify.apprise, "Apprise", FakeApprise)
-
-    try:
-        # Checked - actually posted.
-        resp = client.post("/auth/settings", data={
-            "query_throttle_max": "5", "query_throttle_window_s": "30", "query_min_spread_s": "0.5",
-            "apprise_urls": "", "apprise_notify_level": "WARNING",
-            "devices_page_most_recent_only": "true",
-        })
-        assert resp.status_code == 200
-        assert settings_store.load()["devices_page_most_recent_only"] is True
-        assert "checked" in resp.text
-
-        # Unchecked - a real browser simply wouldn't post this field at all.
-        resp = client.post("/auth/settings", data={
-            "query_throttle_max": "5", "query_throttle_window_s": "30", "query_min_spread_s": "0.5",
-            "apprise_urls": "", "apprise_notify_level": "WARNING",
-        })
-        assert resp.status_code == 200
-        assert settings_store.load()["devices_page_most_recent_only"] is False
-    finally:
-        _remove_apprise_handlers()
-
-
 def test_app_settings_semantic_location_map_round_trips(client, tmp_path, monkeypatch):
     """The semantic-name/lat/lon rows (see routers/auth.py's
     _parse_semantic_map_form) are a dynamic table, posted as parallel
@@ -209,20 +171,21 @@ def test_app_settings_semantic_location_map_defaults_match_mode_to_full(client, 
             "semantic_name": ["Home"],
             "semantic_lat": ["1.0"],
             "semantic_lon": ["2.0"],
+            "semantic_alt": ["5.0"],
             # No semantic_match_mode posted at all for this row.
         })
         assert resp.status_code == 200
         assert settings_store.load()["semantic_location_map"] == {
-            "Home": {"latitude": 1.0, "longitude": 2.0, "match_mode": "full"},
+            "Home": {"latitude": 1.0, "longitude": 2.0, "altitude": 5.0, "match_mode": "full"},
         }
     finally:
         _remove_apprise_handlers()
 
 
-def test_app_settings_semantic_location_map_altitude_is_optional(client, tmp_path, monkeypatch):
-    """A row posted with no semantic_alt value still saves - just with no
-    altitude, same as before this field existed. A non-numeric value is
-    dropped from the row rather than rejecting the whole row."""
+def test_app_settings_semantic_location_map_requires_altitude(client, tmp_path, monkeypatch):
+    """A row posted with no semantic_alt value (or a non-numeric one) is
+    dropped entirely, same as a missing/non-numeric latitude or longitude -
+    altitude is required, not optional."""
     from webui import config, settings_store
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
@@ -239,10 +202,7 @@ def test_app_settings_semantic_location_map_altitude_is_optional(client, tmp_pat
             "semantic_alt": ["", "not-a-number"],
         })
         assert resp.status_code == 200
-        assert settings_store.load()["semantic_location_map"] == {
-            "Home": {"latitude": 1.0, "longitude": 2.0, "match_mode": "full"},
-            "Office": {"latitude": 3.0, "longitude": 4.0, "match_mode": "full"},
-        }
+        assert settings_store.load()["semantic_location_map"] == {}
     finally:
         _remove_apprise_handlers()
 
@@ -319,7 +279,6 @@ def test_save_app_settings_yaml_persists_and_switches_back_to_form(client, tmp_p
             "query_min_spread_s: 2.0\n"
             "apprise_urls: json://yaml.example/hook\n"
             "apprise_notify_level: CRITICAL\n"
-            "devices_page_most_recent_only: false\n"
             "staleness_sweep_interval_s: 900\n"
             "semantic_location_map: {}\n"
         )
@@ -332,7 +291,6 @@ def test_save_app_settings_yaml_persists_and_switches_back_to_form(client, tmp_p
         assert saved["query_throttle_max"] == 9
         assert saved["apprise_urls"] == "json://yaml.example/hook"
         assert saved["apprise_notify_level"] == "CRITICAL"
-        assert saved["devices_page_most_recent_only"] is False
     finally:
         _remove_apprise_handlers()
 
@@ -351,12 +309,12 @@ def test_save_app_settings_yaml_persists_a_semantic_location_map(client, tmp_pat
             "query_min_spread_s: 2.0\n"
             "apprise_urls: \"\"\n"
             "apprise_notify_level: WARNING\n"
-            "devices_page_most_recent_only: false\n"
             "staleness_sweep_interval_s: 900\n"
             "semantic_location_map:\n"
             "  Nest Mini - Living Room:\n"
             "    latitude: 45.0\n"
             "    longitude: 9.0\n"
+            "    altitude: 120.0\n"
         )
         resp = client.post("/auth/settings/yaml", data={"yaml_text": yaml_text})
         assert resp.status_code == 200
@@ -364,7 +322,7 @@ def test_save_app_settings_yaml_persists_a_semantic_location_map(client, tmp_pat
         saved = settings_store.load()
         # No match_mode in the posted YAML - defaults to "full".
         assert saved["semantic_location_map"] == {
-            "Nest Mini - Living Room": {"latitude": 45.0, "longitude": 9.0, "match_mode": "full"},
+            "Nest Mini - Living Room": {"latitude": 45.0, "longitude": 9.0, "altitude": 120.0, "match_mode": "full"},
         }
     finally:
         _remove_apprise_handlers()
@@ -384,12 +342,12 @@ def test_save_app_settings_yaml_persists_a_partial_match_semantic_location_map(c
             "query_min_spread_s: 2.0\n"
             "apprise_urls: \"\"\n"
             "apprise_notify_level: WARNING\n"
-            "devices_page_most_recent_only: false\n"
             "staleness_sweep_interval_s: 900\n"
             "semantic_location_map:\n"
             "  Living Room:\n"
             "    latitude: 45.0\n"
             "    longitude: 9.0\n"
+            "    altitude: 120.0\n"
             "    match_mode: partial\n"
         )
         resp = client.post("/auth/settings/yaml", data={"yaml_text": yaml_text})
@@ -397,7 +355,7 @@ def test_save_app_settings_yaml_persists_a_partial_match_semantic_location_map(c
 
         saved = settings_store.load()
         assert saved["semantic_location_map"] == {
-            "Living Room": {"latitude": 45.0, "longitude": 9.0, "match_mode": "partial"},
+            "Living Room": {"latitude": 45.0, "longitude": 9.0, "altitude": 120.0, "match_mode": "partial"},
         }
     finally:
         _remove_apprise_handlers()
@@ -417,7 +375,6 @@ def test_save_app_settings_yaml_persists_a_semantic_location_map_altitude(client
             "query_min_spread_s: 2.0\n"
             "apprise_urls: \"\"\n"
             "apprise_notify_level: WARNING\n"
-            "devices_page_most_recent_only: false\n"
             "staleness_sweep_interval_s: 900\n"
             "semantic_location_map:\n"
             "  Nest Mini - Living Room:\n"
@@ -451,7 +408,6 @@ def test_save_app_settings_yaml_rejects_an_invalid_match_mode(client, tmp_path, 
         "query_min_spread_s: 2.0\n"
         "apprise_urls: \"\"\n"
         "apprise_notify_level: WARNING\n"
-        "devices_page_most_recent_only: false\n"
         "staleness_sweep_interval_s: 900\n"
         "semantic_location_map:\n"
         "  Nest Mini - Living Room:\n"
@@ -478,7 +434,6 @@ def test_save_app_settings_yaml_rejects_a_malformed_semantic_location_map(client
         "query_min_spread_s: 2.0\n"
         "apprise_urls: \"\"\n"
         "apprise_notify_level: WARNING\n"
-        "devices_page_most_recent_only: false\n"
         "staleness_sweep_interval_s: 900\n"
         "semantic_location_map:\n"
         "  Nest Mini - Living Room: not-a-mapping\n"

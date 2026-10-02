@@ -71,6 +71,17 @@ async def staleness_table(request: Request):
     })
 
 
+@router.post("/staleness/refresh")
+@login_required
+async def staleness_refresh(request: Request):
+    """Same shared-cache bypass as webui/routers/devices.py's own
+    /devices/refresh (see its docstring) - the Devices and Staleness pages
+    read the account's device list through the same device_list_cache slot,
+    so either page's "Refresh" button has to invalidate it."""
+    device_list_cache.invalidate()
+    return await staleness_table(request)
+
+
 def _parse_duration_field(form, base_name: str, allow_off: bool) -> int | None:
     """(preset select + "Custom" hours input) -> seconds, or None. allow_off
     additionally recognizes staleness.REPEAT_OFF ("alert once, don't

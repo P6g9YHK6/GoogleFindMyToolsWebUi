@@ -51,6 +51,24 @@ jobs:
       - name: Run tests
         run: pytest -v --cov=webui --cov-report=term-missing
 
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend assets
+        run: npm run build
+
   lock-freshness:
     runs-on: ubuntu-latest
     steps:

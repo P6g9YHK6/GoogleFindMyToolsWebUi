@@ -273,7 +273,7 @@ window.startStalenessAgoTicker = function () {
 };
 
 function _updateStalenessRow(canonicId, newestFixTs) {
-  const row = document.querySelector(`#staleness-table tr[data-canonic-id="${CSS.escape(canonicId)}"]`);
+  const row = document.querySelector(`#staleness-table [data-canonic-id="${CSS.escape(canonicId)}"]`);
   if (!row || !newestFixTs) return;
 
   const agoEl = row.querySelector("[data-last-fix-ts]");

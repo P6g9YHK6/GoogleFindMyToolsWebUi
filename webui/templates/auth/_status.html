@@ -1,5 +1,5 @@
 {% if status.cleanup_warning %}
-  <p class="form-error">⚠ {{ status.cleanup_warning }}</p>
+  <p class="form-error"><svg class="icon icon-sm"><use href="#i-alert"/></svg> {{ status.cleanup_warning }}</p>
 {% endif %}
 
 {% if status.logged_in %}

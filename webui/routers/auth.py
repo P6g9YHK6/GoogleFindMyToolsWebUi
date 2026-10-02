@@ -12,32 +12,17 @@ from webui.auth_state import is_logged_in
 from webui.deps import query_gate
 from webui.templating import templates
 
-
-def _to_bool(value) -> bool:
-    """Used as an _APP_SETTINGS_SCHEMA caster - plain bool(value) would
-    treat any non-empty string (including the literal text "false", if
-    someone quotes it that way editing the YAML view) as True. A real YAML
-    boolean already comes out of yaml.safe_load as an actual bool, so this
-    only has to special-case the string form."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in ("1", "true", "yes", "on")
-    return bool(value)
-
-
 _SEMANTIC_MATCH_MODES = ("full", "partial")
 
 
 def _to_semantic_map(value) -> dict:
     """Used as an _APP_SETTINGS_SCHEMA caster for the YAML-edit path - see
     _parse_semantic_map_form for the structured-form equivalent. Expects
-    {name: {"latitude": ..., "longitude": ..., "altitude": ... (optional),
+    {name: {"latitude": ..., "longitude": ..., "altitude": ...,
     "match_mode": "full"|"partial"}}; raises (caught by
     _validate_app_settings, same as every other caster here) on anything
-    else, including a name with no coordinates, a non-numeric one, or an
-    unrecognized match_mode. match_mode defaults to "full" and altitude to
-    absent - entries saved before either field existed still validate."""
+    else, including a name with no coordinates/altitude, a non-numeric one,
+    or an unrecognized match_mode. match_mode defaults to "full"."""
     if not isinstance(value, dict):
         raise TypeError("not a mapping")
     result = {}
@@ -49,15 +34,14 @@ def _to_semantic_map(value) -> dict:
         match_mode = coords.get("match_mode", "full")
         if match_mode not in _SEMANTIC_MATCH_MODES:
             raise ValueError(f"match_mode must be one of {_SEMANTIC_MATCH_MODES}")
-        entry = {
+        if "latitude" not in coords or "longitude" not in coords or "altitude" not in coords:
+            raise ValueError("latitude, longitude and altitude are all required")
+        result[name] = {
             "latitude": float(coords["latitude"]),
             "longitude": float(coords["longitude"]),
+            "altitude": float(coords["altitude"]),
             "match_mode": match_mode,
         }
-        altitude = coords.get("altitude")
-        if altitude is not None:
-            entry["altitude"] = float(altitude)
-        result[name] = entry
     return result
 
 
@@ -72,9 +56,8 @@ def _parse_semantic_map_form(form) -> dict:
     skip a genuinely empty row" leniency an unchecked checkbox or blank text
     field gets elsewhere on this form. An unrecognized/missing match_mode
     falls back to "full" instead of dropping the row - coordinates are what
-    make a row valid, not the match type. altitude is optional - left blank,
-    the row still saves, just with no altitude (same as before this field
-    existed); a non-numeric value is dropped rather than the whole row."""
+    make a row valid, not the match type. A blank/non-numeric altitude drops
+    the row too, same as a blank/non-numeric latitude or longitude."""
     names = form.getlist("semantic_name")
     lats = form.getlist("semantic_lat")
     lons = form.getlist("semantic_lon")
@@ -89,16 +72,11 @@ def _parse_semantic_map_form(form) -> dict:
             entry = {
                 "latitude": float(lat),
                 "longitude": float(lon),
+                "altitude": float(alt),
                 "match_mode": match_mode if match_mode in _SEMANTIC_MATCH_MODES else "full",
             }
         except (TypeError, ValueError):
             continue
-        alt = alt.strip()
-        if alt:
-            try:
-                entry["altitude"] = float(alt)
-            except ValueError:
-                pass
         result[name] = entry
     return result
 
@@ -109,7 +87,6 @@ _APP_SETTINGS_SCHEMA: dict[str, Callable[[Any], Any]] = {
     "query_min_spread_s": float,
     "apprise_urls": str,
     "apprise_notify_level": str,
-    "devices_page_most_recent_only": _to_bool,
     "staleness_sweep_interval_s": int,
     "semantic_location_map": _to_semantic_map,
 }
@@ -164,11 +141,6 @@ async def save_app_settings(
     query_min_spread_s: float = Form(...),
     apprise_urls: str = Form(""),
     apprise_notify_level: str = Form("WARNING"),
-    # An unchecked checkbox simply isn't posted at all - Form(False) is what
-    # correctly resolves that absence to False, same as every other missing-
-    # field default here (nothing browser-side to distinguish "off" from
-    # "never touched" for a plain, non-htmx form like this one).
-    devices_page_most_recent_only: bool = Form(False),
     staleness_sweep_interval_s: int = Form(3600),
 ):
     # The semantic-name/lat/lon rows are a dynamic, variable-length table
@@ -185,7 +157,6 @@ async def save_app_settings(
         "query_min_spread_s": query_min_spread_s,
         "apprise_urls": apprise_urls,
         "apprise_notify_level": apprise_notify_level,
-        "devices_page_most_recent_only": devices_page_most_recent_only,
         "staleness_sweep_interval_s": staleness_sweep_interval_s,
         "semantic_location_map": _parse_semantic_map_form(form),
     }

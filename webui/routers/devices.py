@@ -6,11 +6,11 @@ from fastapi import APIRouter, Request
 from NovaApi.ListDevices.nbe_list_devices import request_device_list
 from ProtoDecoders.decoder import get_device_details, parse_device_list_protobuf
 from SpotApi.UploadPrecomputedPublicKeyIds.upload_precomputed_public_key_ids import refresh_custom_trackers
-from webui import demo_data, demo_mode, device_location_store, scheduler, settings_store
+from webui import demo_data, demo_mode, device_location_store, scheduler, staleness
 from webui.auth_state import is_logged_in
 from webui.deps import run_blocking
 from webui.device_list_cache import device_list_cache
-from webui.forwarders import config_store
+from webui.forwarders import config_store, latest_values_store
 from webui.templating import templates
 
 router = APIRouter()
@@ -142,11 +142,6 @@ async def get_devices() -> list[dict]:
             return get_device_details(device_list)
 
         device_details = await run_blocking(device_list_cache.get_or_fetch, _fetch)
-    # Loaded once for the whole page, not per device - a page-load-time
-    # display preference, not a per-device or per-endpoint setting (see
-    # settings_store.py; unrelated to forwarding's own per-endpoint
-    # only_most_recent toggle in webui/forwarders/policy.py).
-    most_recent_only_display = settings_store.load().get("devices_page_most_recent_only")
 
     devices = []
     for detail in device_details:
@@ -162,16 +157,24 @@ async def get_devices() -> list[dict]:
         # many forwarding endpoints are configured, straight off the same
         # forwarding config _next_poll above already reads per device.
         device_cfg = config_store.get_device_config(canonic_id)
+        # Just the newest reading, and only its map pin - Google can return
+        # several in one response, but the page only ever shows the latest
+        # (see device_location_store.most_recent_only's own docstring).
         last_locations = last["locations"] if last else None
-        if last_locations and most_recent_only_display:
+        if last_locations:
             last_locations = device_location_store.most_recent_only(last_locations)
         # Sharing/ownership info (see ProtoDecoders.decoder.get_device_details)
         # - "Owner only" for the common case (just your own account, isOwner
         # true) rather than listing yourself back to yourself.
         shared_with = [a["email"] for a in detail["access"] if not a["this_account"]]
+        # Quiet freshness chip (webui/staleness.py's display_status) - not
+        # this device's opt-in alerting status (most devices never configure
+        # that, see default_staleness), just "how old is the newest ping".
+        staleness_cfg = latest_values_store.get_device_staleness(canonic_id)
         devices.append({
             "name": detail["name"],
             "canonic_id": canonic_id,
+            "staleness_display": staleness.display_status(canonic_id, staleness_cfg),
             # Lets webui/tracked_registrations.py's matching exclude phones
             # up front - a registered tracker's identity should never
             # legitimately collide with one, but there's no reason to risk
@@ -242,3 +245,16 @@ async def devices_table(request: Request):
     return templates.TemplateResponse(
         request, "devices/_table.html", {"devices": devices, "map_devices_json": _map_devices_json(devices)}
     )
+
+
+@router.post("/devices/refresh")
+async def devices_refresh(request: Request):
+    """The Devices/Staleness pages' "Refresh" button (see devices/list.html,
+    staleness/list.html) - both read the account's device list through the
+    one shared device_list_cache slot (webui/device_list_cache.py, now kept
+    for a full day, see config.DEVICE_LIST_CACHE_TTL_S), so a manual bypass
+    has to invalidate that shared slot, not just re-run this page's own
+    query. Re-renders the same table a plain page load would, now forced to
+    actually hit Google instead of serving the cached list."""
+    device_list_cache.invalidate()
+    return await devices_table(request)

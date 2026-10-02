@@ -1,0 +1,19 @@
+{
+  "name": "googlefindmytoolswebui-assets",
+  "private": true,
+  "description": "Build-time only: minifies webui/static/*.css|js and vendors htmx/Leaflet/fonts locally instead of a CDN. Never installed in the runtime image - see docker/web/Dockerfile's assets stage.",
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "htmx.org": "1.9.12",
+    "leaflet": "1.9.4",
+    "@fontsource/sora": "^5.1.0",
+    "@fontsource/figtree": "^5.1.0",
+    "@fontsource/jetbrains-mono": "^5.1.0"
+  },
+  "scripts": {
+    "build:vendor": "node scripts/copy-vendor.mjs",
+    "build:css": "esbuild webui/static/app.css --minify --outfile=webui/static/dist/app.css",
+    "build:js": "esbuild webui/static/app.js webui/static/tables.js webui/static/endpoint_fields.js webui/static/firmware.js webui/static/provision.js webui/static/debug_export.js --minify --outdir=webui/static/dist",
+    "build": "npm run build:vendor && npm run build:css && npm run build:js"
+  }
+}

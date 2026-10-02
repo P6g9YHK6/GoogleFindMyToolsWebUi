@@ -1,7 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Staleness - GoogleFindMyToolsWebUi{% endblock %}
 {% block content %}
-<h1>Staleness</h1>
+<div class="page-head">
+  <h1>Staleness</h1>
+  {# Same shared device-list cache (and manual bypass) as the Devices page's
+     own Refresh button - see webui/device_list_cache.py. #}
+  <button type="button" class="btn-secondary" hx-post="/staleness/refresh"
+          hx-target="#staleness-table" hx-swap="innerHTML" hx-indicator="#staleness-refresh-spinner">
+    <svg class="icon icon-sm"><use href="#i-refresh"/></svg> Refresh device list
+  </button>
+  <span id="staleness-refresh-spinner" class="action-spinner htmx-indicator" aria-hidden="true"></span>
+</div>
 <p>Alerts when a device stops producing newer location fixes - a BLE tag only reports
    through a nearby phone, so a long gap can mean a dead battery, being out of range of
    any of your devices, or just sitting still with nothing nearby to relay it. Off by

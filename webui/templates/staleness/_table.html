@@ -16,19 +16,15 @@
   </span>
 {% endmacro %}
 
-<div class="table-scroll">
-<table class="sortable-table" data-table-id="staleness">
-  <thead>
-    <tr><th>Device</th><th>Status</th><th>Last update</th><th>Configure</th></tr>
-  </thead>
-  <tbody>
-  {% for row in rows %}
-    {% set status = row.status %}
-    <tr class="{% if not status.enabled %}staleness-row--disabled{% endif %}"
-        data-canonic-id="{{ row.canonic_id }}" data-enabled="{{ '1' if status.enabled else '0' }}"
-        data-muted="{{ '1' if status.muted else '0' }}" data-threshold-s="{{ status.threshold_s or '' }}">
-      <td>{{ row.name }}</td>
-      <td class="staleness-status">
+<div class="device-grid">
+{% for row in rows %}
+  {% set status = row.status %}
+  <div class="device-card{% if not status.enabled %} staleness-row--disabled{% endif %}"
+       data-canonic-id="{{ row.canonic_id }}" data-enabled="{{ '1' if status.enabled else '0' }}"
+       data-muted="{{ '1' if status.muted else '0' }}" data-threshold-s="{{ status.threshold_s or '' }}">
+    <div class="device-card-head">
+      <b class="device-card-name">{{ row.name }}</b>
+      <span class="staleness-status">
         {% if not status.enabled %}
           <span class="log-skipped">Tracking off</span>
         {% elif status.muted %}
@@ -40,51 +36,47 @@
         {% else %}
           <span class="log-ok">Fresh</span>
         {% endif %}
-      </td>
-      <td>
-        {{ row.last_fix_str or "-" }}
-        {% if status.last_fix_time %}
-          <br><span class="staleness-ago" data-last-fix-ts="{{ status.last_fix_time }}"></span>
-        {% endif %}
-      </td>
-      <td>
-        <details class="staleness-configure">
-          <summary>Configure</summary>
-          <form hx-post="/staleness/devices/{{ row.canonic_id }}" hx-target="#staleness-table" hx-swap="innerHTML">
-            <label class="checkbox-label">
-              <input type="checkbox" name="enabled" value="1" {% if row.staleness.enabled %}checked{% endif %}>
-              Alert when this device stops updating
-            </label>
+      </span>
+    </div>
 
-            <label>Alert threshold
-              {{ duration_field("threshold", row.staleness.threshold_s, false) }}
-            </label>
-            <p class="field-hint">Nothing fires until this is set - see the Devices page's "Last locate result" for what counts as an update (this compares against the same fix timestamp Google reports there).</p>
+    <div class="device-card-meta">
+      <span>{{ row.last_fix_str or "-" }}</span>
+      {% if status.last_fix_time %}<span class="staleness-ago" data-last-fix-ts="{{ status.last_fix_time }}"></span>{% endif %}
+    </div>
 
-            <label>Repeat while still stale
-              {{ duration_field("repeat", row.staleness.repeat_s, true) }}
-            </label>
+    <details class="staleness-configure">
+      <summary>Configure</summary>
+      <form hx-post="/staleness/devices/{{ row.canonic_id }}" hx-target="#staleness-table" hx-swap="innerHTML">
+        <label class="checkbox-label">
+          <input type="checkbox" name="enabled" value="1" {% if row.staleness.enabled %}checked{% endif %}>
+          Alert when this device stops updating
+        </label>
 
-            <label>Alert message
-              <textarea name="message_template" rows="2" class="url-input">{{ row.staleness.message_template }}</textarea>
-            </label>
-            <p class="field-hint">{{ '{{device_name}}' }}, {{ '{{device_alias}}' }} and {{ '{{threshold}}' }}/{{ '{{age}}' }} (e.g. "2 days") are available.</p>
+        <label>Alert threshold
+          {{ duration_field("threshold", row.staleness.threshold_s, false) }}
+        </label>
+        <p class="field-hint">Nothing fires until this is set - see the Devices page's "Last locate result" for what counts as an update (this compares against the same fix timestamp Google reports there).</p>
 
-            <label class="checkbox-label">
-              <input type="checkbox" name="muted" value="1" {% if row.staleness.muted %}checked{% endif %}>
-              Mute (tracking stays on, but nothing is sent - not the stale alert, not the recovery notice)
-            </label>
+        <label>Repeat while still stale
+          {{ duration_field("repeat", row.staleness.repeat_s, true) }}
+        </label>
 
-            <button type="submit">Save</button>
-          </form>
-        </details>
-      </td>
-    </tr>
-  {% else %}
-    <tr><td colspan="4">No devices found.</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
+        <label>Alert message
+          <textarea name="message_template" rows="2" class="url-input">{{ row.staleness.message_template }}</textarea>
+        </label>
+
+        <label class="checkbox-label">
+          <input type="checkbox" name="muted" value="1" {% if row.staleness.muted %}checked{% endif %}>
+          Mute (tracking stays on, but nothing is sent - not the stale alert, not the recovery notice)
+        </label>
+
+        <button type="submit">Save</button>
+      </form>
+    </details>
+  </div>
+{% else %}
+  <p>No devices found.</p>
+{% endfor %}
 </div>
 <script>
   if (window.startStalenessAgoTicker) {

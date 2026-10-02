@@ -1,117 +1,85 @@
-{% from "_macros.html" import columns_menu %}
-{{ columns_menu([
-  ("name", "Name"), ("alias", "Alias"), ("device", "Device"), ("actions", "Actions"),
-  ("locate_result", "Last locate result"), ("map", "Map"), ("last_seen", "Last seen by find hub"),
-  ("endpoints", "Endpoints"), ("polled_at", "Polled at"), ("next_poll", "Next poll"),
-]) }}
-<div class="table-scroll">
-<table class="sortable-table" data-table-id="devices">
-  <thead>
-    <tr>
-      <th data-col="name">Name</th><th data-col="alias">Alias</th><th data-col="device">Device</th><th data-col="actions">Actions</th><th data-col="locate_result">Last locate result</th><th data-col="map">Map</th><th data-col="last_seen">Last seen by find hub</th><th data-col="endpoints">Endpoints</th><th data-col="polled_at">Polled at</th><th data-col="next_poll">Next poll</th>
-    </tr>
-  </thead>
-  <tbody>
-  {% for device in devices %}
-    <tr>
-      <td>{{ device.name }}</td>
-      {# The local nickname set on the Settings page (see
-         webui/routers/settings.py's "Device alias" field) - blank until
-         one's actually set, same as that field itself. #}
-      <td>{{ device.alias or "-" }}</td>
-      <td class="device-cell">
-        {# Category/photo straight from Google's own response - see
-           ProtoDecoders.decoder.get_device_details and
-           webui/routers/devices.py's _device_type_label. Manufacturer/
-           model/carrier/codename/registration date/IMEI/sharing info are
-           real but more sensitive (IMEI especially) or just verbose, so
-           they stay behind this <details> toggle rather than in the
-           always-visible row - same "advanced, not hidden" pattern as the
-           cron builder's "Advanced: custom cron schedule" on the Settings
-           page. #}
-        <div class="device-summary">
-          {% if device.image_url %}
-            {# Same URL as the full-size popup (see static/app.js's
-               .device-thumb-btn handler and devices/list.html's
-               #device-image-modal) - Google already serves one image per
-               device, just shown here shrunk to an icon by .device-thumb's
-               own CSS, so opening it larger needs no different URL. #}
-            <button type="button" class="device-thumb-btn" data-image-url="{{ device.image_url }}" data-image-label="{{ device.name }}" aria-label="View full-size photo of {{ device.name }}">
-              <img class="device-thumb" src="{{ device.image_url }}" alt="" loading="lazy">
-            </button>
-          {% endif %}
-          {% if device.type_label %}<span>{{ device.type_label }}</span>{% endif %}
-        </div>
-        {% if device.manufacturer or device.model or device.carrier or device.codename or device.registered_at_str or device.imei or device.shared_with %}
-          <details class="device-details">
-            <summary>Details</summary>
-            <ul>
-              {% if device.manufacturer %}<li>Manufacturer: {{ device.manufacturer }}</li>{% endif %}
-              {% if device.model %}<li>Model: {{ device.model }}</li>{% endif %}
-              {% if device.carrier %}<li>Carrier: {{ device.carrier }}</li>{% endif %}
-              {% if device.codename %}<li>Codename: {{ device.codename }}</li>{% endif %}
-              {% if device.registered_at_str %}<li>Registered: {{ device.registered_at_str }}</li>{% endif %}
-              {% if device.imei %}<li>IMEI: {{ device.imei }}</li>{% endif %}
-              {% if device.shared_with %}<li>Shared with: {{ device.shared_with | join(", ") }}</li>{% endif %}
-            </ul>
-          </details>
-        {% endif %}
-      </td>
-      <td class="actions-cell">
-        <button type="button" class="btn-icon" title="Locate"
-                hx-post="/devices/{{ device.canonic_id }}/locate?name={{ device.name | urlencode }}"
-                hx-target="#locate-result-{{ loop.index }}" hx-swap="innerHTML"
-                hx-indicator="#action-spinner-{{ device.canonic_id }}">📍</button>
-        <button type="button" class="btn-icon" title="Play sound"
-                hx-post="/devices/{{ device.canonic_id }}/sound/start"
-                hx-target="#sound-status-{{ device.canonic_id }}" hx-swap="innerHTML"
-                hx-indicator="#action-spinner-{{ device.canonic_id }}">🔊</button>
-        <button type="button" class="btn-icon" title="Stop sound"
-                hx-post="/devices/{{ device.canonic_id }}/sound/stop"
-                hx-target="#sound-status-{{ device.canonic_id }}" hx-swap="innerHTML"
-                hx-indicator="#action-spinner-{{ device.canonic_id }}">🔇</button>
-        {# Shared by all three buttons above - htmx shows/hides this
-           automatically while any of their requests is in flight, via its
-           own "htmx-indicator" class (auto-injected opacity rules; see
-           base.html's htmx <script> tag). #}
-        <span id="action-spinner-{{ device.canonic_id }}" class="action-spinner htmx-indicator" aria-hidden="true"></span>
-        {# Only Play sound/Stop sound render into this - Locate already has
-           its own dedicated result cell (see _locate_cell.html) with real
-           location data, not just a pass/fail glyph. #}
-        <span id="sound-status-{{ device.canonic_id }}" class="action-status"></span>
-      </td>
-      <td id="locate-result-{{ loop.index }}">
-        {% set canonic_id = device.canonic_id %}
-        {% set name = device.name %}
-        {% set locations = device.last_locations %}
-        {% set fetched_at_str = device.last_fetched_at_str %}
-        {% include "devices/_locate_cell.html" %}
-      </td>
-      <td id="map-links-{{ device.canonic_id }}">
-        {% include "devices/_map_links_cell.html" %}
-      </td>
-      {# Phone-only (Spot/BLE tags never have this) - see
-         ProtoDecoders/decoder.py:get_last_seen. #}
-      <td>{{ device.last_seen_str or "-" }}</td>
-      <td>{{ device.endpoint_count }}</td>
-      {# Per-fetch metadata, not per-location - its own column (updated via
-         the same OOB swap as the Map column - see _locate_cell.html) rather
-         than a line inside the "Last locate result" cell, which used to
-         throw off that column's row-for-row alignment with Map's. #}
-      <td id="polled-at-{{ device.canonic_id }}">{{ device.last_fetched_at_str or "-" }}</td>
-      <td>
+<div class="device-grid">
+{% for device in devices %}
+  <div class="device-card">
+    <div class="device-card-head">
+      <div>
+        <b class="device-card-name">{{ device.name }}</b>
+        {% if device.alias %}<span class="device-card-alias">{{ device.alias }}</span>{% endif %}
+      </div>
+      {% set status = device.staleness_display %}
+      {% if status and status.state == "fresh" %}
+        <span class="status-chip status-chip--fresh"><i></i>Fresh</span>
+      {% elif status and status.state == "stale" %}
+        <span class="status-chip status-chip--stale"><i></i>Stale</span>
+      {% endif %}
+    </div>
+
+    <div class="device-summary">
+      {% if device.image_url %}
+        <button type="button" class="device-thumb-btn" data-image-url="{{ device.image_url }}" data-image-label="{{ device.name }}" aria-label="View full-size photo of {{ device.name }}">
+          <img class="device-thumb" src="{{ device.image_url }}" alt="" loading="lazy">
+        </button>
+      {% endif %}
+      {% if device.type_label %}<span>{{ device.type_label }}</span>{% endif %}
+    </div>
+    {% if device.manufacturer or device.model or device.carrier or device.codename or device.registered_at_str or device.imei or device.shared_with %}
+      <details class="device-details">
+        <summary>Details</summary>
+        <ul>
+          {% if device.manufacturer %}<li>Manufacturer: {{ device.manufacturer }}</li>{% endif %}
+          {% if device.model %}<li>Model: {{ device.model }}</li>{% endif %}
+          {% if device.carrier %}<li>Carrier: {{ device.carrier }}</li>{% endif %}
+          {% if device.codename %}<li>Codename: {{ device.codename }}</li>{% endif %}
+          {% if device.registered_at_str %}<li>Registered: {{ device.registered_at_str }}</li>{% endif %}
+          {% if device.imei %}<li>IMEI: {{ device.imei }}</li>{% endif %}
+          {% if device.shared_with %}<li>Shared with: {{ device.shared_with | join(", ") }}</li>{% endif %}
+        </ul>
+      </details>
+    {% endif %}
+
+    <div id="locate-result-{{ loop.index }}">
+      {% set canonic_id = device.canonic_id %}
+      {% set name = device.name %}
+      {% set locations = device.last_locations %}
+      {% set fetched_at_str = device.last_fetched_at_str %}
+      {% include "devices/_locate_cell.html" %}
+    </div>
+
+    <div class="device-card-meta">
+      <span>Seen by Find Hub: {{ device.last_seen_str or "-" }}</span>
+      <span>Endpoints: {{ device.endpoint_count }}</span>
+      <span id="polled-at-{{ device.canonic_id }}">Polled: {{ device.last_fetched_at_str or "-" }}</span>
+    </div>
+    <div class="device-card-meta">
+      <span>
         {{ device.next_poll_str or "Not scheduled" }}
-        · <a href="/settings#device-{{ device.canonic_id }}">Edit</a>
+        · <a href="/settings#device-{{ device.canonic_id }}"><svg class="icon icon-sm"><use href="#i-edit"/></svg>Edit</a>
         {% if device.next_poll_ts %}
-          <br><span class="next-poll-countdown" data-next-poll-ts="{{ device.next_poll_ts }}"></span>
+          <span class="next-poll-countdown" data-next-poll-ts="{{ device.next_poll_ts }}"></span>
         {% endif %}
-      </td>
-    </tr>
-  {% else %}
-    <tr><td colspan="10">No devices found.</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
+      </span>
+    </div>
+
+    <div class="device-card-actions">
+      <button type="button" class="btn-icon" title="Locate"
+              hx-post="/devices/{{ device.canonic_id }}/locate?name={{ device.name | urlencode }}"
+              hx-target="#locate-result-{{ loop.index }}" hx-swap="innerHTML"
+              hx-indicator="#action-spinner-{{ device.canonic_id }}"><svg class="icon"><use href="#i-crosshair"/></svg></button>
+      <button type="button" class="btn-icon" title="Play sound"
+              hx-post="/devices/{{ device.canonic_id }}/sound/start"
+              hx-target="#sound-status-{{ device.canonic_id }}" hx-swap="innerHTML"
+              hx-indicator="#action-spinner-{{ device.canonic_id }}"><svg class="icon"><use href="#i-volume"/></svg></button>
+      <button type="button" class="btn-icon" title="Stop sound"
+              hx-post="/devices/{{ device.canonic_id }}/sound/stop"
+              hx-target="#sound-status-{{ device.canonic_id }}" hx-swap="innerHTML"
+              hx-indicator="#action-spinner-{{ device.canonic_id }}"><svg class="icon"><use href="#i-mute"/></svg></button>
+      <span id="action-spinner-{{ device.canonic_id }}" class="action-spinner htmx-indicator" aria-hidden="true"></span>
+      <span id="sound-status-{{ device.canonic_id }}" class="action-status"></span>
+    </div>
+  </div>
+{% else %}
+  <p>No devices found.</p>
+{% endfor %}
 </div>
 <script>
   if (window.seedMapMarkers) {
