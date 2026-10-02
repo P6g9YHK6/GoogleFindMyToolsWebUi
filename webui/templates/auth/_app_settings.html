@@ -72,17 +72,19 @@
        forwarded using them, still flagged as a semantic (not GPS) fix. With Full match the name must equal
        exactly what Google reports, case included; Partial match only requires it to appear somewhere in what
        Google reports, case-insensitively - check the Devices page or a Forwarding Log entry's payload for the
-       exact text.</p>
+       exact text. Altitude is optional - leave it blank if you don't know it; a destination that needs a number
+       there (e.g. Traccar) just won't get one.</p>
     <div class="kv-section">
       <div class="kv-head"><h3>Mappings</h3><button type="button" class="btn-add" id="semantic-map-add">+ Add row</button></div>
       <table>
-        <thead><tr><th>Semantic name</th><th>Latitude</th><th>Longitude</th><th>Match type</th><th></th></tr></thead>
+        <thead><tr><th>Semantic name</th><th>Latitude</th><th>Longitude</th><th>Altitude</th><th>Match type</th><th></th></tr></thead>
         <tbody class="kv-body" data-kv="semantic-map">
           {% for name, coords in app_settings.semantic_location_map.items() %}
             <tr>
               <td><input type="text" class="kv-key" name="semantic_name" value="{{ name }}" placeholder="Nest Mini - Living Room"></td>
               <td><input type="number" step="any" name="semantic_lat" value="{{ coords.latitude }}"></td>
               <td><input type="number" step="any" name="semantic_lon" value="{{ coords.longitude }}"></td>
+              <td><input type="number" step="any" name="semantic_alt" value="{{ coords.altitude if coords.altitude is not none else '' }}" placeholder="optional"></td>
               <td>
                 <select name="semantic_match_mode">
                   <option value="full" {% if coords.match_mode | default("full") == "full" %}selected{% endif %}>Full match</option>
@@ -114,6 +116,7 @@
           '<td><input type="text" class="kv-key" name="semantic_name" placeholder="Nest Mini - Living Room"></td>' +
           '<td><input type="number" step="any" name="semantic_lat"></td>' +
           '<td><input type="number" step="any" name="semantic_lon"></td>' +
+          '<td><input type="number" step="any" name="semantic_alt" placeholder="optional"></td>' +
           '<td><select name="semantic_match_mode"><option value="full" selected>Full match</option><option value="partial">Partial match</option></select></td>' +
           '<td class="kv-remove-cell"><button type="button" class="btn-remove-row" title="Remove row">✕</button></td>';
         body.appendChild(tr);

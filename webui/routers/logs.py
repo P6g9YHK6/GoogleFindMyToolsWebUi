@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
 from webui import system_log_store
-from webui.auth_state import is_logged_in
+from webui.auth_state import login_required
 from webui.forwarders import log_store
 from webui.templating import templates
 
@@ -102,9 +102,8 @@ def _has_active_filters(filters: dict) -> bool:
 
 
 @router.get("/logs")
+@login_required
 async def logs_page(request: Request):
-    if not is_logged_in():
-        return templates.TemplateResponse(request, "_not_signed_in.html", {})
     filters = _filters_from_request(request)
     return templates.TemplateResponse(request, "logs/list.html", {
         "entries": _matching_entries(filters),
@@ -115,11 +114,10 @@ async def logs_page(request: Request):
 
 
 @router.get("/logs/table")
+@login_required
 async def logs_table(request: Request):
     """Partial re-render of just the table, for the filter form's live
-    (htmx) updates - see logs/list.html."""
-    if not is_logged_in():
-        return templates.TemplateResponse(request, "_not_signed_in.html", {})
+    (htmx) updates."""
     filters = _filters_from_request(request)
     return templates.TemplateResponse(request, "logs/_table.html", {
         "entries": _matching_entries(filters),

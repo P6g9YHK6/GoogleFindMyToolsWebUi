@@ -6,6 +6,7 @@
 /Auth/auth.yaml
 /example_data.json
 /webui/data/
+/webui/firmware/
 __pycache__/
 .env
 .coverage

@@ -19,6 +19,16 @@
 # default env (see docker/web/Dockerfile), so a single volume mounted there
 # covers all of it - no subfolders to keep track of.
 #
+# The on-demand ESP-IDF toolchain (~2GB) and firmware-build sandboxes live
+# under /firmware in the container instead (see webui/config.py's
+# GFMT_FIRMWARE_DIR), and that is deliberately NOT mounted here: they sit in
+# the image's writable layer, so a container replace wipes them and the next
+# build re-provisions - entirely automatic, nothing to back up. To keep the
+# toolchain across replaces so a later build skips the re-download, uncomment
+# the `firmware:/firmware` mount and the `firmware:` volume below. Either way
+# build sandboxes and a stale toolchain are auto-reclaimed (TTL-based) on
+# startup - see main.py's lifespan.
+#
 # LAN-only setup by default: plain HTTP (set HTTPS_ENABLED=1 for a
 # self-signed cert instead - see README.md's Security section), and no auth
 # unless both HTTP_USER and HTTP_PASSWORD are set (e.g. via a .env file, see
@@ -46,7 +56,9 @@ services:
       - GFMT_TLS_SAN=${GFMT_TLS_SAN:-}
     volumes:
       - data:/data
+      # - firmware:/firmware
     restart: unless-stopped
 
 volumes:
   data:
+  # firmware:

@@ -98,30 +98,18 @@ async def _poll_device(canonic_id: str):
 
         due_indices = [i for i, t in enumerate(next_runs) if t is not None and t <= wake_at]
 
-        # name is the local, editable alias (see webui/routers/settings.py's
-        # _rows) - falls back to canonic_id if this device was never
-        # actually saved through the settings UI. Used everywhere below that
-        # just needs one human-friendly label (locate logging, the
-        # forwarding log, the websocket broadcast) exactly as before
-        # device_alias existed as its own template token. google_name is the
-        # real, fixed name from the Google account itself, kept in sync
-        # locally by that same _rows() on every settings-page load so it's
-        # available here without a live device-list fetch on every poll -
-        # falls back to the alias (then canonic_id) for a device saved
-        # before google_name started being persisted. {{device_name}} and
-        # {{device_alias}} in a template resolve to google_name and name
-        # respectively - see webui/forwarders/custom.py's build_context.
+        # name: local alias (settings.py's rows() syncs it), falls back to
+        # canonic_id. google_name: the account's real, fixed name, synced
+        # the same way, falls back to name. {{device_name}}/{{device_alias}}
+        # resolve to google_name/name respectively - custom.py's build_context.
         name = device_cfg.get("display_name", canonic_id)
         google_name = device_cfg.get("google_name") or name
-        # Manufacturer/model/type/etc - see webui/routers/settings.py's
-        # _rows(), which is what actually persists this (same reasoning as
-        # google_name just above: this poll loop never talks to Google's
-        # device-list API itself).
+        # Manufacturer/model/type/etc, synced by the same settings.py rows()
+        # - this poll loop never talks to Google's device-list API itself.
         device_meta = device_cfg.get("device_meta")
 
         if not is_logged_in():
-            # Don't trigger the Google login flow from the background poller -
-            # that's only ever meant to happen from a deliberate /auth click.
+            # Don't trigger the Google login flow from the background poller.
             locations = []
         else:
             try:
@@ -130,32 +118,23 @@ async def _poll_device(canonic_id: str):
                 locations = []
                 logger.warning("Locate failed for %s: %s", name, e)
 
-        # Fills in fixed coordinates for any SEMANTIC reading with a
-        # configured name (see webui/forwarders/semantic_map.py and
-        # settings_store's semantic_location_map) - done once here, before
-        # storage or forwarding, so both see the same already-mapped
-        # locations and neither has to know about the mapping itself.
+        # Maps any SEMANTIC reading with a configured name to fixed
+        # coordinates, once here, so storage and forwarding both see the
+        # same result without either knowing about the mapping itself.
         locations = semantic_map.apply_semantic_mapping(locations, settings_store.load().get("semantic_location_map", {}))
 
         already_seen_by_index: list[bool] = []
         is_most_recent_by_index: list[bool] = []
         if locations:
-            # The Devices page's "last locate result" should reflect cron
-            # polls too, not just manual clicks - a timeout/failure above
-            # already left `locations` empty, so this never clobbers the
-            # last real fix with nothing. Reassigned to the stamped list
-            # set_last_location returns, whose transient "_new_this_fetch"
-            # is how the forwarding loop below tells a genuinely new reading
-            # apart from Google re-serving one it already returned before -
-            # captured into a plain parallel list and popped off each dict
-            # right away, so it never leaks into the websocket broadcast or
-            # the forwarding payload below.
+            # Reassigned to the stamped list set_last_location returns, so
+            # the Devices page's "last locate result" reflects cron polls
+            # too. Its transient "_new_this_fetch" tells a genuinely new
+            # reading apart from Google re-serving an old one - popped off
+            # right away so it never leaks into the broadcast/forward payload.
             locations = device_location_store.set_last_location(canonic_id, locations, int(time.time()))
             already_seen_by_index = [not loc.pop("_new_this_fetch") for loc in locations]
-            # Google can bundle several readings in one response (see
-            # decrypt_locations.py) in no particular order - computed once
-            # per batch here, same "skip" role as already_seen_by_index
-            # above, for policy._skip_not_most_recent's per-endpoint toggle.
+            # Google can bundle several readings per response, in no
+            # particular order - for policy._skip_not_most_recent's toggle.
             most_recent_time: int | None = max(
                 (loc["time"] for loc in locations if loc.get("time") is not None), default=None,
             )
@@ -163,16 +142,10 @@ async def _poll_device(canonic_id: str):
                 most_recent_time is None or loc.get("time") == most_recent_time for loc in locations
             ]
 
-        # Keyed by endpoint index, overwritten on every matching location the
-        # same way the old flat status-only version did (last location in the
-        # batch wins) - now also carrying which location that status came
-        # from, so a successful "ok" can update the endpoint's last-sent
-        # position for next time's distance-skip check. Each result also
-        # captures the URL its request actually went to and a merged
-        # config+state view (see latest_values_store) up front, rather than
-        # re-reading `endpoints` after the fact below - a concurrent
-        # settings save could otherwise change what's at that position
-        # mid-poll.
+        # Keyed by endpoint index (last location in the batch wins), also
+        # carrying which location + merged config/state each result used -
+        # captured up front rather than re-reading `endpoints` after the
+        # fact, since a concurrent settings save could change it mid-poll.
         results: dict[int, dict] = {}
         for location, already_seen, is_most_recent in zip(locations, already_seen_by_index, is_most_recent_by_index):
             for i in due_indices:
@@ -204,11 +177,9 @@ async def _poll_device(canonic_id: str):
             latest_values_store.set_endpoint_state(canonic_id, result["url"], state)
 
         if due_indices:
-            # Display-only, same as webui/routers/locate.py's manual button -
-            # forwarding above already saw the full `locations`; this is just
-            # what's broadcast to live map pins on the Devices page, so a
-            # cron poll's live update never disagrees with what a page
-            # reload (webui/routers/devices.py) would show.
+            # Display-only - forwarding above already saw the full
+            # `locations`; this is just what's broadcast to the Devices
+            # page's live map pins.
             display_locations = locations
             if display_locations and settings_store.load().get("devices_page_most_recent_only"):
                 display_locations = device_location_store.most_recent_only(display_locations)
@@ -286,10 +257,8 @@ def restart_device(canonic_id: str):
         existing.cancel()
 
     if demo_mode.is_demo_mode():
-        # A demo visitor saving a device with endpoints must not spawn a
-        # real (if harmless - every call it would make is itself demo-aware)
-        # background polling task - see webui/main.py's lifespan, which
-        # already skips start_all() for the same reason.
+        # A demo visitor saving a device must not spawn a real background
+        # polling task - main.py's lifespan skips start_all() for the same reason.
         return
 
     device_cfg = config_store.get_device_config(canonic_id)

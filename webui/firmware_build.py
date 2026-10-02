@@ -11,8 +11,11 @@ on demand and cached the first time anyone actually builds, see
 webui/esp_idf_provisioning.py.
 
 Never builds against the checked-in ESP32Firmware/ tree directly - each build
-runs in its own throwaway copy under DATA_DIR/firmware_builds/, so concurrent
-or repeated builds can never corrupt the repo's own source or each other. All
+runs in its own throwaway copy under GFMT_FIRMWARE_DIR/firmware_builds/ (see
+webui/config.py; a size-capped, age-capped sandbox pruned by prune_old_builds
+on every build and at startup), so concurrent or repeated builds can never
+corrupt the repo's own source or each other - and rare builders never hug a
+pile of ~170MB sandboxes. All
 per-build values are injected by (re)writing main/build_config.h in that
 throwaway copy - see _write_build_config() and ESP32Firmware/main/build_config.h's
 own docstring.
@@ -25,6 +28,7 @@ import pathlib
 import re
 import shutil
 import tempfile
+import time
 
 from webui import config, demo_mode, esp_idf_provisioning
 from webui.ws import firmware_manager
@@ -54,10 +58,6 @@ _TX_POWER_ENUM = {
     -12: "ESP_PWR_LVL_N12", -9: "ESP_PWR_LVL_N9", -6: "ESP_PWR_LVL_N6", -3: "ESP_PWR_LVL_N3",
     0: "ESP_PWR_LVL_N0", 3: "ESP_PWR_LVL_P3", 6: "ESP_PWR_LVL_P6", 9: "ESP_PWR_LVL_P9",
 }
-
-# Keep at most this many past build directories around (see _prune_old_builds)
-# so DATA_DIR/firmware_builds doesn't grow without bound.
-_MAX_KEPT_BUILDS = 5
 
 _ACTIVE_PHASES = {"provisioning", "cloning", "installing_toolchain", "preparing", "building", "merging"}
 
@@ -146,9 +146,9 @@ async def _run_build(board: str, eid_hex: str, device_name: str = "GFMT Tracker"
         idf_py = esp_idf_provisioning.idf_py_path()
 
         target = _BOARDS[board]
-        builds_dir = config.DATA_DIR / "firmware_builds"
+        builds_dir = config.GFMT_FIRMWARE_DIR / "firmware_builds"
         builds_dir.mkdir(parents=True, exist_ok=True)
-        _prune_old_builds(builds_dir)
+        prune_old_builds()
 
         job_dir = pathlib.Path(await asyncio.to_thread(tempfile.mkdtemp, prefix="build-", dir=str(builds_dir)))
         src_dir = job_dir / "ESP32Firmware"
@@ -319,7 +319,46 @@ async def _merge_bin(idf_env: dict, src_dir: pathlib.Path, artifact_path: pathli
     return chip
 
 
-def _prune_old_builds(builds_dir: pathlib.Path):
+def migrate_legacy_builds_dir() -> None:
+    """One-time relocation for build sandboxes created before the firmware
+    directory moved out of DATA_DIR: relocates DATA_DIR/firmware_builds (if a
+    pre-move install left any behind) into GFMT_FIRMWARE_DIR/firmware_builds,
+    so the backed-up volume sheds the pile and it ends up where pruning
+    expects it. Called before prune_old_builds() in main.py's lifespan.
+    Deletes (rather than moves) if one already exists at the destination."""
+    src = config.DATA_DIR / "firmware_builds"
+    dst = config.GFMT_FIRMWARE_DIR / "firmware_builds"
+    if not src.exists() or src.resolve() == dst.resolve():
+        return
+    if dst.exists():
+        logger.info("Removing leftover firmware build sandboxes at %s (already exists under %s)", src, dst)
+        shutil.rmtree(src, ignore_errors=True)
+        return
+    logger.info("Migrating firmware build sandboxes from %s to %s", src, dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), str(dst))
+
+
+def prune_old_builds():
+    """Deletes stale build sandboxes under GFMT_FIRMWARE_DIR/firmware_builds:
+    anything older than GFMT_FIRMWARE_BUILD_TTL_S (0 disables the age sweep),
+    then everything beyond the newest GFMT_FIRMWARE_KEEP_BUILDS. Called before
+    every build (so repeat builders stay bounded even mid-session) and once at
+    app startup (webui/main.py), so build-and-forget volumes on an optional
+    /firmware mount get reclaimed without anyone having to remember to."""
+    builds_dir = config.GFMT_FIRMWARE_DIR / "firmware_builds"
+    if not builds_dir.exists():
+        return
+
+    ttl_s = config.GFMT_FIRMWARE_BUILD_TTL_S
+    now = time.time()
+    for d in list(builds_dir.iterdir()):
+        if d.is_dir() and ttl_s > 0 and now - d.stat().st_mtime > ttl_s:
+            shutil.rmtree(d, ignore_errors=True)
+
+    keep = config.GFMT_FIRMWARE_KEEP_BUILDS
     dirs = sorted((d for d in builds_dir.iterdir() if d.is_dir()), key=lambda d: d.stat().st_mtime)
-    for stale in dirs[:-_MAX_KEPT_BUILDS] if len(dirs) >= _MAX_KEPT_BUILDS else []:
+    # keep <= 0 means keep nothing - dirs[:-0] is dirs[:0], i.e. empty, which
+    # would keep everything, so spell that case out.
+    for stale in (dirs[:-keep] if keep > 0 else list(dirs)):
         shutil.rmtree(stale, ignore_errors=True)

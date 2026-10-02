@@ -12,7 +12,7 @@ from webui import (
     registration_presets,
     tracked_registrations,
 )
-from webui.auth_state import is_logged_in
+from webui.auth_state import login_required
 from webui.firmware_build import REPO_ROOT
 from webui.routers.devices import device_type_plain_label, get_devices
 from webui.templating import templates
@@ -93,14 +93,10 @@ async def firmware_build_download():
 
 
 @router.get("/firmware/tracked")
+@login_required
 async def firmware_tracked(request: Request):
-    """The Tracked Registrations panel (firmware/page.html) - loaded via
-    hx-trigger="load", same auto-load-on-page-view pattern as
-    webui/routers/devices.py's /devices/table, so it needs no separate
-    button and reuses that same 8s device-list cache rather than issuing its
-    own uncached fetch."""
-    if not is_logged_in():
-        return templates.TemplateResponse(request, "_not_signed_in.html", {})
+    """The Tracked Registrations panel - loaded via hx-trigger="load", reusing
+    the same cached device list as /devices/table rather than fetching its own."""
     entries = [entry for entry in firmware_store.list_registered() if entry["keep_track"]]
     tracked = []
     if entries:

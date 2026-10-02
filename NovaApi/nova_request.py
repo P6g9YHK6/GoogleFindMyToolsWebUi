@@ -5,6 +5,7 @@
 
 import binascii
 import logging
+import time
 
 import requests
 from bs4 import BeautifulSoup
@@ -15,6 +16,15 @@ from Auth.username_provider import get_username
 from NovaApi.query_throttle import query_throttle
 
 logger = logging.getLogger(__name__)
+
+# requests.post() below previously had no timeout at all (could hang
+# forever) and no retry, so a single transient TCP/TLS blip - e.g. Google's
+# endpoint closing the connection mid-response, surfaced as
+# "('Connection aborted.', RemoteDisconnected(...))" - killed the whole
+# locate/forward attempt outright.
+NOVA_REQUEST_TIMEOUT_S = 30
+NOVA_REQUEST_RETRIES = 2
+NOVA_REQUEST_RETRY_BACKOFF_S = 2
 
 
 def nova_request(api_scope, hex_payload):
@@ -31,8 +41,24 @@ def nova_request(api_scope, hex_payload):
 
     payload = binascii.unhexlify(hex_payload)
 
-    query_throttle.wait_turn()
-    response = requests.post(url, headers=headers, data=payload)
+    attempt = 0
+    while True:
+        query_throttle.wait_turn()
+        try:
+            response = requests.post(
+                url, headers=headers, data=payload, timeout=NOVA_REQUEST_TIMEOUT_S,
+            )
+            break
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as ex:
+            attempt += 1
+            if attempt > NOVA_REQUEST_RETRIES:
+                raise
+            logger.info(
+                "Nova request to %s hit a transient network error (%s), "
+                "retrying (%s/%s)",
+                api_scope, ex, attempt, NOVA_REQUEST_RETRIES,
+            )
+            time.sleep(NOVA_REQUEST_RETRY_BACKOFF_S)
 
     if response.status_code == 200:
         return response.content.hex()

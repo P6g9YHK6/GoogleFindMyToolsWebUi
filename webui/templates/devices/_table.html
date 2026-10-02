@@ -1,24 +1,9 @@
-<div class="table-toolbar">
-  {# Show/hide checkboxes, one per data-col below - static/tables.js reads
-     this menu's checkboxes on load/change and persists the result (see
-     "Devices" and "Logs" table both sharing this markup shape) instead of
-     generating it, matching the rest of this file's hand-written columns. #}
-  <details class="columns-menu">
-    <summary>Columns</summary>
-    <menu>
-      <li><label><input type="checkbox" data-col="name" checked> Name</label></li>
-      <li><label><input type="checkbox" data-col="alias" checked> Alias</label></li>
-      <li><label><input type="checkbox" data-col="device" checked> Device</label></li>
-      <li><label><input type="checkbox" data-col="actions" checked> Actions</label></li>
-      <li><label><input type="checkbox" data-col="locate_result" checked> Last locate result</label></li>
-      <li><label><input type="checkbox" data-col="map" checked> Map</label></li>
-      <li><label><input type="checkbox" data-col="last_seen" checked> Last seen by find hub</label></li>
-      <li><label><input type="checkbox" data-col="endpoints" checked> Endpoints</label></li>
-      <li><label><input type="checkbox" data-col="polled_at" checked> Polled at</label></li>
-      <li><label><input type="checkbox" data-col="next_poll" checked> Next poll</label></li>
-    </menu>
-  </details>
-</div>
+{% from "_macros.html" import columns_menu %}
+{{ columns_menu([
+  ("name", "Name"), ("alias", "Alias"), ("device", "Device"), ("actions", "Actions"),
+  ("locate_result", "Last locate result"), ("map", "Map"), ("last_seen", "Last seen by find hub"),
+  ("endpoints", "Endpoints"), ("polled_at", "Polled at"), ("next_poll", "Next poll"),
+]) }}
 <div class="table-scroll">
 <table class="sortable-table" data-table-id="devices">
   <thead>

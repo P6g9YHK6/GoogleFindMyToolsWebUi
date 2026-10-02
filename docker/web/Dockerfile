@@ -41,9 +41,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY . /app
 
 # GFMT_SECRETS_DIR is deliberately not set here - Auth/token_cache.py falls
-# back to GFMT_DATA_DIR when it's unset, so everything (auth.yaml alongside
-# config.yaml/forwarding.yaml/forward.log/...) lands flat in one directory,
-# no subfolders, matching the single `-v .../data:/data` mount below.
+# back to GFMT_DATA_DIR when it's unset, so everything we expect you to back
+# up (auth.yaml alongside config.yaml/forwarding.yaml/forward.log/...) lands
+# flat in one directory, no subfolders, matching the single `-v .../data:/data`
+# mount below. The ~2.5GB on-demand ESP-IDF toolchain and firmware-build
+# sandboxes are deliberately NOT in there - they live under
+# GFMT_FIRMWARE_DIR=/firmware (see webui/config.py), in the image's writable
+# layer by default with no mount, so they're ephemeral unless you opt in to a
+# `-v .../firmware:/firmware` mount (docker-compose.yml, the Unraid template).
+# Rebuildable at any time and auto-reclaimed after a disuse TTL - nothing there
+# is worth backing up.
 #
 # GFMT_BUILD_SHA/GFMT_BUILD_DATE/GFMT_BUILD_BRANCH identify what's actually
 # running (shown in the web UI's footer, see webui/templating.py) without the
@@ -71,6 +78,7 @@ RUN echo "Building ${GFMT_BUILD_SHA} (${GFMT_BUILD_BRANCH}, ${GFMT_BUILD_DATE})"
 ENV DISPLAY=:99 \
     GFMT_BROWSER_RUNTIME_DIR=/run/gfmt-browser \
     GFMT_DATA_DIR=/data \
+    GFMT_FIRMWARE_DIR=/firmware \
     GFMT_NONINTERACTIVE=1 \
     GFMT_BUILD_SHA=${GFMT_BUILD_SHA} \
     GFMT_BUILD_DATE=${GFMT_BUILD_DATE} \

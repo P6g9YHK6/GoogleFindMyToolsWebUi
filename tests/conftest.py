@@ -22,6 +22,7 @@ import tempfile
 # Must happen before anything under webui/Auth is first imported - DATA_DIR/
 # secrets paths are computed once, at import time, from these env vars.
 os.environ["GFMT_DATA_DIR"] = tempfile.mkdtemp(prefix="gfmt-test-data-")
+os.environ["GFMT_FIRMWARE_DIR"] = tempfile.mkdtemp(prefix="gfmt-test-firmware-")
 os.environ["GFMT_SECRETS_DIR"] = tempfile.mkdtemp(prefix="gfmt-test-secrets-")
 os.environ["GFMT_NONINTERACTIVE"] = "1"
 # NovaApi/query_throttle.py's shared singleton is a real module-level global,
@@ -56,10 +57,10 @@ def stub_backend(monkeypatch):
     """Sane defaults for every router's external-service boundary, so most
     tests get a working "happy path" for free and only override what they
     specifically care about."""
-    from webui import demo_mode
+    from webui import auth_state, demo_mode
     from webui.device_list_cache import device_list_cache
     from webui.forwarders import settings_service
-    from webui.routers import auth, devices, firmware, locate, logs, register, settings, sound
+    from webui.routers import auth, devices, locate, register, sound
     from webui.routers import staleness as staleness_router
 
     # webui/device_list_cache.py's singleton is a real module-level global
@@ -76,8 +77,11 @@ def stub_backend(monkeypatch):
             "model": None, "carrier": None, "codename": None, "imei": None, "registered_at": None, "access": [],
         }]
 
-    for mod in (devices, firmware, settings, logs, staleness_router):
-        monkeypatch.setattr(mod, "is_logged_in", lambda: True)
+    monkeypatch.setattr(devices, "is_logged_in", lambda: True)
+    # firmware/settings/logs/staleness route through auth_state.login_required
+    # now instead of each importing is_logged_in themselves, so one patch
+    # here covers all four.
+    monkeypatch.setattr(auth_state, "is_logged_in", lambda: True)
     # webui/demo_mode.py's devices_placeholder_active() looks up the real
     # webui.auth_state.is_logged_in() (its own bound name - see that
     # module), not any router's stubbed one above - without this, it reads

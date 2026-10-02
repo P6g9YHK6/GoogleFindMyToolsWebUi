@@ -13,6 +13,8 @@ Adding a new destination here needs no new Python function, just a new
 entry below.
 """
 
+from webui.forwarders.custom import NAMED_DEVICE_META_KEYS
+
 PRESETS: dict[str, dict] = {
     "custom": {
         "label": "Custom",
@@ -195,12 +197,6 @@ BUILTIN_VARIABLES_FROM_APP: list[tuple[str, str]] = [
 # variable name/description without caring which group it's in (e.g.
 # custom.build_context's docstring points here as the canonical list).
 BUILTIN_VARIABLES: list[tuple[str, str]] = BUILTIN_VARIABLES_FROM_FIX + BUILTIN_VARIABLES_FROM_APP
-
-# Mirrors custom.py's own private _NAMED_DEVICE_META_KEYS - duplicated
-# rather than imported since that one's private to the send-time renderer;
-# both need to draw the same "these four are always named, everything else
-# becomes label_<key>" line.
-NAMED_DEVICE_META_KEYS = ("manufacturer", "model", "type", "image_url")
 
 # Hand-written descriptions for the phone-only device_meta fields, reused by
 # device_label_variables() below so a chip's tooltip stays in sync with what

@@ -1,3 +1,7 @@
+import functools
+
+from starlette.requests import Request
+
 from Auth import token_cache
 from Auth.token_cache import get_cached_value
 from webui import config
@@ -21,3 +25,17 @@ def auth_store_ok() -> bool:
     if config.DEMO_MODE:
         return True
     return token_cache.last_load_ok()
+
+
+def login_required(handler):
+    """Route decorator: renders _not_signed_in.html instead of running
+    handler when logged out. `templates` is imported inside the wrapper, not
+    at module level, to avoid a cycle (webui.templating -> webui.scheduler ->
+    this module)."""
+    @functools.wraps(handler)
+    async def wrapper(request: Request, **kwargs):
+        if not is_logged_in():
+            from webui.templating import templates
+            return templates.TemplateResponse(request, "_not_signed_in.html", {})
+        return await handler(request, **kwargs)
+    return wrapper

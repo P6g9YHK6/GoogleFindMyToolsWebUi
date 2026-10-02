@@ -172,6 +172,7 @@ def test_app_settings_semantic_location_map_round_trips(client, tmp_path, monkey
             "semantic_name": ["Nest Mini - Living Room", ""],
             "semantic_lat": ["45.0", ""],
             "semantic_lon": ["9.0", ""],
+            "semantic_alt": ["120.0", ""],
             "semantic_match_mode": ["partial", "full"],
         })
         assert resp.status_code == 200
@@ -179,7 +180,9 @@ def test_app_settings_semantic_location_map_round_trips(client, tmp_path, monkey
 
         saved = settings_store.load()
         assert saved["semantic_location_map"] == {
-            "Nest Mini - Living Room": {"latitude": 45.0, "longitude": 9.0, "match_mode": "partial"},
+            "Nest Mini - Living Room": {
+                "latitude": 45.0, "longitude": 9.0, "altitude": 120.0, "match_mode": "partial",
+            },
         }
 
         # A fresh GET of the Config page reflects the saved mapping too.
@@ -211,6 +214,34 @@ def test_app_settings_semantic_location_map_defaults_match_mode_to_full(client, 
         assert resp.status_code == 200
         assert settings_store.load()["semantic_location_map"] == {
             "Home": {"latitude": 1.0, "longitude": 2.0, "match_mode": "full"},
+        }
+    finally:
+        _remove_apprise_handlers()
+
+
+def test_app_settings_semantic_location_map_altitude_is_optional(client, tmp_path, monkeypatch):
+    """A row posted with no semantic_alt value still saves - just with no
+    altitude, same as before this field existed. A non-numeric value is
+    dropped from the row rather than rejecting the whole row."""
+    from webui import config, settings_store
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "APP_SETTINGS_PATH", tmp_path / "config.yaml")
+    _stub_apprise(monkeypatch)
+
+    try:
+        resp = client.post("/auth/settings", data={
+            "query_throttle_max": "5", "query_throttle_window_s": "30", "query_min_spread_s": "0.5",
+            "apprise_urls": "", "apprise_notify_level": "WARNING",
+            "semantic_name": ["Home", "Office"],
+            "semantic_lat": ["1.0", "3.0"],
+            "semantic_lon": ["2.0", "4.0"],
+            "semantic_alt": ["", "not-a-number"],
+        })
+        assert resp.status_code == 200
+        assert settings_store.load()["semantic_location_map"] == {
+            "Home": {"latitude": 1.0, "longitude": 2.0, "match_mode": "full"},
+            "Office": {"latitude": 3.0, "longitude": 4.0, "match_mode": "full"},
         }
     finally:
         _remove_apprise_handlers()
@@ -367,6 +398,41 @@ def test_save_app_settings_yaml_persists_a_partial_match_semantic_location_map(c
         saved = settings_store.load()
         assert saved["semantic_location_map"] == {
             "Living Room": {"latitude": 45.0, "longitude": 9.0, "match_mode": "partial"},
+        }
+    finally:
+        _remove_apprise_handlers()
+
+
+def test_save_app_settings_yaml_persists_a_semantic_location_map_altitude(client, tmp_path, monkeypatch):
+    from webui import config, settings_store
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "APP_SETTINGS_PATH", tmp_path / "config.yaml")
+    _stub_apprise(monkeypatch)
+
+    try:
+        yaml_text = (
+            "query_throttle_max: 9\n"
+            "query_throttle_window_s: 45.0\n"
+            "query_min_spread_s: 2.0\n"
+            "apprise_urls: \"\"\n"
+            "apprise_notify_level: WARNING\n"
+            "devices_page_most_recent_only: false\n"
+            "staleness_sweep_interval_s: 900\n"
+            "semantic_location_map:\n"
+            "  Nest Mini - Living Room:\n"
+            "    latitude: 45.0\n"
+            "    longitude: 9.0\n"
+            "    altitude: 120.0\n"
+        )
+        resp = client.post("/auth/settings/yaml", data={"yaml_text": yaml_text})
+        assert resp.status_code == 200
+
+        saved = settings_store.load()
+        assert saved["semantic_location_map"] == {
+            "Nest Mini - Living Room": {
+                "latitude": 45.0, "longitude": 9.0, "altitude": 120.0, "match_mode": "full",
+            },
         }
     finally:
         _remove_apprise_handlers()

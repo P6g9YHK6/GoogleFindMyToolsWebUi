@@ -1,5 +1,7 @@
 import asyncio
 import json
+import os
+import time
 
 import yaml
 
@@ -347,10 +349,98 @@ def test_set_keep_track_is_a_noop_for_unknown_eid():
     # The store is a real, session-shared singleton across this whole test
     # file (see conftest.py's GFMT_DATA_DIR comment) - "1"*40/"2"*40 above
     # are already in it by the time this runs, so this only asserts that an
-    # eid_hex nothing has ever registered stays absent, not that the store
-    # is empty.
+    # eid_hex nothing has ever registered stays absent, not that the store is
+    # empty.
     firmware_store.set_keep_track("unknown" + "0" * 33, True)  # must not raise
     assert not any(e["eid_hex"] == "unknown" + "0" * 33 for e in firmware_store.list_registered())
+
+
+def test_prune_old_builds_keeps_newest_n(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "GFMT_FIRMWARE_DIR", tmp_path)
+    monkeypatch.setattr(config, "GFMT_FIRMWARE_KEEP_BUILDS", 3)
+    monkeypatch.setattr(config, "GFMT_FIRMWARE_BUILD_TTL_S", 0)  # disable age sweep
+
+    builds = tmp_path / "firmware_builds"
+    builds.mkdir()
+    now = time.time()
+    for i in range(5):
+        d = builds / f"build-{i}"
+        d.mkdir()
+        # Each 1 minute apart, oldest first.
+        os.utime(d, (now + i * 60, now + i * 60))
+
+    firmware_build.prune_old_builds()
+
+    remaining = sorted(d.name for d in builds.iterdir())
+    assert len(remaining) == 3
+    assert remaining == ["build-2", "build-3", "build-4"]  # newest 3
+
+
+def test_prune_old_builds_removes_old_by_ttl(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "GFMT_FIRMWARE_DIR", tmp_path)
+    monkeypatch.setattr(config, "GFMT_FIRMWARE_KEEP_BUILDS", 100)  # keep count doesn't interfere
+    monkeypatch.setattr(config, "GFMT_FIRMWARE_BUILD_TTL_S", 86400 * 7)  # 7 days
+
+    builds = tmp_path / "firmware_builds"
+    builds.mkdir()
+    now = time.time()
+    old = builds / "old"
+    old.mkdir()
+    os.utime(old, (now - 86400 * 14, now - 86400 * 14))  # 14 days ago
+    fresh = builds / "fresh"
+    fresh.mkdir()
+    os.utime(fresh, (now, now))
+
+    firmware_build.prune_old_builds()
+
+    assert not old.exists()
+    assert fresh.exists()
+
+
+def test_prune_old_builds_does_nothing_when_empty(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "GFMT_FIRMWARE_DIR", tmp_path)
+    monkeypatch.setattr(config, "GFMT_FIRMWARE_KEEP_BUILDS", 5)
+    monkeypatch.setattr(config, "GFMT_FIRMWARE_BUILD_TTL_S", 2592000)
+    builds = tmp_path / "firmware_builds"
+    builds.mkdir()
+    firmware_build.prune_old_builds()  # must not raise
+
+
+def test_migrate_legacy_builds_dir_moves_sandboxes(monkeypatch, tmp_path):
+    old_data = tmp_path / "data"
+    fw = tmp_path / "firmware"
+    (old_data / "firmware_builds" / "build-old").mkdir(parents=True)
+    monkeypatch.setattr(config, "DATA_DIR", old_data)
+    monkeypatch.setattr(config, "GFMT_FIRMWARE_DIR", fw)
+
+    firmware_build.migrate_legacy_builds_dir()
+
+    assert (fw / "firmware_builds" / "build-old").is_dir()
+    assert not (old_data / "firmware_builds").exists()
+
+
+def test_migrate_legacy_builds_dir_noop_when_nothing_to_migrate(monkeypatch, tmp_path):
+    old_data = tmp_path / "data"
+    old_data.mkdir()
+    monkeypatch.setattr(config, "DATA_DIR", old_data)
+    monkeypatch.setattr(config, "GFMT_FIRMWARE_DIR", tmp_path / "firmware")
+
+    firmware_build.migrate_legacy_builds_dir()  # must not raise
+    assert (tmp_path / "firmware").exists() is False
+
+
+def test_migrate_legacy_builds_dir_deletes_leftover_when_dest_exists(monkeypatch, tmp_path):
+    old_data = tmp_path / "data"
+    fw = tmp_path / "firmware"
+    (old_data / "firmware_builds").mkdir(parents=True)
+    (fw / "firmware_builds").mkdir(parents=True)
+    monkeypatch.setattr(config, "DATA_DIR", old_data)
+    monkeypatch.setattr(config, "GFMT_FIRMWARE_DIR", fw)
+
+    firmware_build.migrate_legacy_builds_dir()
+
+    assert not (old_data / "firmware_builds").exists()
+    assert (fw / "firmware_builds").exists()
 
 
 def test_firmware_page_keep_track_checkbox_is_checked(client):
