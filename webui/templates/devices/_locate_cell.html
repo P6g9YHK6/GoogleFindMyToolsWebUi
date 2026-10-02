@@ -1,8 +1,19 @@
 {% if error %}
   <span class="form-error">Locate failed: {{ error }}</span>
 {% elif locations %}
+  {# Only the newest ping stays inline; everything older collapses behind a
+     "+N more pings" <details> (same disclosure idiom as .device-details)
+     instead of always rendering up to 5 full rows - see
+     devices/_table.html's comment on why this list can be this long in a
+     real account. locations is already newest-first. #}
+  {% set overflow_count = (locations | length - 1) if (locations | length) > 1 else 0 %}
   <ul>
   {% for loc in locations %}
+    {% if loop.index0 == 1 and overflow_count > 0 %}
+    </ul>
+    <details class="ping-overflow"><summary>+{{ overflow_count }} more ping{{ "s" if overflow_count != 1 else "" }}</summary>
+    <ul>
+    {% endif %}
     {% if loc.is_semantic %}
     <li>
         {{ loc.semantic_name }}{% if loc.latitude is not none %} (mapped){% endif %}
@@ -11,34 +22,35 @@
     {% if loc.latitude is not none %}
     {# data-loc-key matches the "<canonic_id>:<index>" key static/app.js
        uses for the same location's map pin, so hovering either end can
-       find the other (see seedMapMarkers/upsertDeviceMarkers). Also shown
-       for a semantic reading with mapped coordinates (see
-       webui/forwarders/semantic_map.py), alongside its name above - not
-       just "not semantic" anymore. #}
-    <li data-loc-key="{{ canonic_id }}:{{ loop.index0 }}" style="--dot-color: {{ location_color(canonic_id, loop.index0) }};">
+       find the other (see seedMapMarkers/upsertDeviceMarkers). The Map
+       popover below used to be a separate table column (_map_links_cell.html,
+       kept in sync only by matching this same key) - merged in here so
+       there's one list to scan instead of two columns lined up by position. #}
+    <li class="ping-row" data-loc-key="{{ canonic_id }}:{{ loop.index0 }}" style="--dot-color: {{ location_color(canonic_id, loop.index0) }};">
         <span class="loc-dot"></span>
-        {{ "%.5f"|format(loc.latitude) }}, {{ "%.5f"|format(loc.longitude) }}
+        <span class="mono">{{ "%.5f"|format(loc.latitude) }}, {{ "%.5f"|format(loc.longitude) }}</span>
+        {% if loc.map_links %}
+        <details class="map-menu-wrap">
+          <summary><svg class="icon icon-sm"><use href="#i-pin"/></svg>Map<svg class="icon icon-sm"><use href="#i-chevron"/></svg></summary>
+          <div class="map-menu">
+            {% for label, url in loc.map_links.items() %}<a href="{{ url }}" target="_blank" rel="noopener">{{ label }}</a>{% endfor %}
+          </div>
+        </details>
+        {% endif %}
     </li>
     {% endif %}
   {% endfor %}
   </ul>
+  {% if overflow_count > 0 %}</details>{% endif %}
 {% else %}
   <span>No location received yet.</span>
 {% endif %}
 
 {% if oob_swaps %}
-{# Both OOB targets below must stay <td>, matching the actual element
-   _table.html gives each of these ids - htmx's OOB swap is an outerHTML
-   replace by id, and swapping a <td> for a bare <div> here left a <div>
-   sitting inside a <tr>, which isn't valid table content: the browser's
-   parser foster-parents it out of the table entirely, so it rendered as a
-   stray value to the left of the whole table instead of inside its cell. #}
-<td id="map-links-{{ canonic_id }}" hx-swap-oob="true">
-  {% include "devices/_map_links_cell.html" %}
-</td>
-{# "Polled at" used to be an inline line under the coordinate list itself -
-   moved to its own column (see _table.html) since it's per-fetch metadata,
-   not per-location, and having it only in this cell threw off row-for-row
-   alignment against the Map column next to it. #}
+{# Polled-at is per-fetch metadata, not per-location, so it's still its own
+   OOB-swapped column (see devices/_table.html) kept in sync separately from
+   this cell's own normal (non-OOB) swap. The old second OOB target for the
+   Map column is gone now that Map lives inside this cell's own markup
+   above - one OOB target here instead of two. #}
 <td id="polled-at-{{ canonic_id }}" hx-swap-oob="true">{{ fetched_at_str or "-" }}</td>
 {% endif %}

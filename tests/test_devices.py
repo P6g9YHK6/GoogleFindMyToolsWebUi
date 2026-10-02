@@ -42,14 +42,14 @@ def test_devices_table_shows_alias_and_endpoint_count(client, tmp_path, monkeypa
     assert '<th data-col="alias">Alias</th>' in resp.text
     assert '<th data-col="endpoints">Endpoints</th>' in resp.text
     assert "Garage Tracker" in resp.text
-    assert "<td>2</td>" in resp.text
+    assert 'data-col="endpoints"><span class="mobile-label">Endpoints:</span>2</td>' in resp.text
 
 
 def test_devices_table_alias_and_endpoint_count_default_for_an_unconfigured_device(client):
     resp = client.get("/devices/table")
     assert resp.status_code == 200
-    assert "<td>-</td>" in resp.text  # no alias set yet
-    assert "<td>0</td>" in resp.text  # no endpoints configured yet
+    assert '<td data-col="alias">-</td>' in resp.text  # no alias set yet
+    assert 'data-col="endpoints"><span class="mobile-label">Endpoints:</span>0</td>' in resp.text  # no endpoints configured yet
 
 
 def test_devices_table_last_seen_header_credits_the_find_hub(client):
@@ -143,7 +143,10 @@ def test_devices_table_shows_the_full_batch_when_most_recent_only_is_off(client,
     assert "1.00000, 2.00000" in resp.text
 
 
-def test_devices_table_shows_a_map_links_column_with_every_provider(client, tmp_path, monkeypatch):
+def test_devices_table_shows_map_links_for_every_provider(client, tmp_path, monkeypatch):
+    """Map links render inline in the "Last locate result" cell's own Map
+    popover now (see devices/_locate_cell.html) rather than a separate
+    column - still every provider, in the same order."""
     from webui import config, device_location_store
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
@@ -159,7 +162,7 @@ def test_devices_table_shows_a_map_links_column_with_every_provider(client, tmp_
 
     resp = client.get("/devices/table")
     assert resp.status_code == 200
-    assert '<th data-col="map">Map</th>' in resp.text
+    assert "map-menu" in resp.text
     # OSM is the default/primary provider - listed first, not just present
     assert resp.text.index("openstreetmap.org") < resp.text.index("google.com/maps")
     for host in ("openstreetmap.org", "google.com/maps", "maps.apple.com", "bing.com/maps", "waze.com"):

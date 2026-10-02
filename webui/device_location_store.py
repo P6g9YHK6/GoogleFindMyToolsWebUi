@@ -51,6 +51,18 @@ def _location_key(loc: dict) -> tuple:
     return (loc.get("time"), loc.get("latitude"), loc.get("longitude"), loc.get("status"), loc.get("semantic_name"))
 
 
+def sort_newest_first(locations: list[dict]) -> list[dict]:
+    """Newest ping first. The wire order Google returns isn't guaranteed to
+    be chronological - decrypt_locations.py appends the single
+    "recentLocation" reading after the (unordered) networkLocations list, so
+    it can land anywhere, including last - so display code that cares which
+    one is "the latest" (the Devices page's always-visible ping, and the map
+    pin numbering that has to agree with it, see webui/colors.py) sorts
+    explicitly rather than trusting list order. A location with no "time"
+    sorts last, not first - safer than treating "unknown" as "newest"."""
+    return sorted(locations, key=lambda loc: loc.get("time") if loc.get("time") is not None else -1, reverse=True)
+
+
 def most_recent_only(locations: list[dict]) -> list[dict]:
     """Just the reading(s) with the latest "time" in this list - all of them
     if several share that exact max (no further way to break the tie), or

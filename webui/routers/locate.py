@@ -27,9 +27,9 @@ async def locate(request: Request, canonic_id: str, name: str = ""):
         logger.exception("Locate failed for %s", canonic_id)
         # No oob_swaps here - a failure doesn't touch what's persisted (see
         # the "A timeout/empty result must never clobber..." comment below),
-        # so the separate Map/Polled-at columns (see _locate_cell.html) must
-        # stay exactly as they were, not get OOB-replaced with this
-        # response's own empty `locations`.
+        # so the separate Polled-at column (see _locate_cell.html) must stay
+        # exactly as it was, not get OOB-replaced with this response's own
+        # empty `locations`.
         return templates.TemplateResponse(request, "devices/_locate_cell.html", {
             "canonic_id": canonic_id,
             "name": display_name,
@@ -43,9 +43,9 @@ async def locate(request: Request, canonic_id: str, name: str = ""):
     if locations:
         # A timeout/empty result must never clobber the last real fix
         # already on file - only persist an actual location, and only then
-        # OOB-swap the Map/Polled-at columns (see _locate_cell.html) - for
-        # the same reason as the error branch above, an empty result here
-        # must leave both exactly as they were instead of blanking them out.
+        # OOB-swap the Polled-at column (see _locate_cell.html) - for the
+        # same reason as the error branch above, an empty result here must
+        # leave it exactly as it was instead of blanking it out.
         device_location_store.set_last_location(canonic_id, locations, fetched_at)
         fetched_at_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(fetched_at))
         oob_swaps = True
@@ -55,8 +55,12 @@ async def locate(request: Request, canonic_id: str, name: str = ""):
     # what's shown/broadcast, so the manual click and the page-load table
     # never disagree with each other.
     display_locations = locations
-    if display_locations and settings_store.load().get("devices_page_most_recent_only"):
-        display_locations = device_location_store.most_recent_only(display_locations)
+    if display_locations:
+        # See device_location_store.sort_newest_first's docstring - the
+        # table's page-load render does this same sort for the same reason.
+        display_locations = device_location_store.sort_newest_first(display_locations)
+        if settings_store.load().get("devices_page_most_recent_only"):
+            display_locations = device_location_store.most_recent_only(display_locations)
 
     await manager.broadcast({
         "type": "locate_result",

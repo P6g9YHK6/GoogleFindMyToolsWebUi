@@ -1,24 +1,31 @@
 :root {
-  --bg: #f4f5f7;
+  /* Dracula, exact, for the dark build below; this light build keeps the
+     same hue identities (purple/pink/cyan/success/warning/danger) turned up
+     in saturation/darkened to hold contrast on a light ground, rather than
+     being an unrelated palette - see this design's own mockup for the
+     side-by-side swatches it was built from. */
+  --bg: #f7f6fb;
   --surface: #ffffff;
-  --surface-alt: #f9fafb;
-  --border: #e2e4e9;
-  --text: #1a1d23;
-  --text-muted: #6b7280;
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
+  --surface-alt: #eeecf6;
+  --border: #ddd9ec;
+  --text: #262736;
+  --text-muted: #5b5f86;
+  --primary: #7c4fd6;
+  --primary-hover: #6a3dc0;
   --primary-contrast: #ffffff;
-  --danger: #dc2626;
-  --success: #16a34a;
-  --warning: #b45309;
-  --purple: #7c3aed;
+  --danger: #d6342f;
+  --success: #1f8f45;
+  --warning: #b5610a;
+  --purple: #7c4fd6;
+  --pink: #c22989;
+  --info: #0f7f93;
   --radius: 10px;
   --radius-sm: 6px;
   --radius-lg: 14px;
   --radius-pill: 999px;
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.08);
-  --shadow-md: 0 4px 10px rgba(16, 24, 40, 0.08), 0 2px 4px rgba(16, 24, 40, 0.06);
-  --shadow-lg: 0 12px 28px rgba(16, 24, 40, 0.16), 0 4px 8px rgba(16, 24, 40, 0.08);
+  --shadow: 0 1px 2px rgba(38, 27, 60, 0.06), 0 1px 3px rgba(38, 27, 60, 0.08);
+  --shadow-md: 0 4px 10px rgba(38, 27, 60, 0.08), 0 2px 4px rgba(38, 27, 60, 0.06);
+  --shadow-lg: 0 12px 28px rgba(38, 27, 60, 0.16), 0 4px 8px rgba(38, 27, 60, 0.08);
 
   /* 4px-based rem steps, following the values already scattered through
      this file (0.3/0.4/0.5/0.6/0.75/0.85rem etc.) rather than a generic
@@ -57,27 +64,66 @@
   --tint-strong: 30%;
   --tint-border: 35%;
   --tint-focus: 22%;
+
+  /* Sora for headings, Figtree for body copy, JetBrains Mono for anything
+     literal (coordinates, cron expressions, device ids) - vendored locally
+     (see webui/static/vendor/fonts.css, built by scripts/copy-vendor.mjs),
+     not loaded from Google Fonts' CDN, matching the project's existing
+     "nothing phones home" stance that already motivated vendoring htmx and
+     Leaflet instead of using unpkg.com. */
+  --font-display: 'Sora', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-body: 'Figtree', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+/* Dracula, exact: bd93f9 purple / ff79c6 pink / 8be9fd cyan / 50fa7b green /
+   ffb86c orange / ff5555 red on 282a36/343746/44475a. Guarded with
+   :not([data-theme="light"]) so an explicit Light choice (see the theme
+   switch in base.html) beats the OS/browser dark preference; the identical
+   values are repeated below under :root[data-theme="dark"] so an explicit
+   Dark choice wins even when the OS preference is light. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #14161a;
-    --surface: #1c1f26;
-    --surface-alt: #20242c;
-    --border: #2c313a;
-    --text: #e7e9ee;
-    --text-muted: #9aa1ae;
-    --primary: #3b82f6;
-    --primary-hover: #60a5fa;
-    --primary-contrast: #0b1220;
-    --danger: #f87171;
-    --success: #4ade80;
-    --warning: #fbbf24;
-    --purple: #a78bfa;
+  :root:not([data-theme="light"]) {
+    --bg: #282a36;
+    --surface: #343746;
+    --surface-alt: #21222c;
+    --border: #44475a;
+    --text: #f8f8f2;
+    --text-muted: #6272a4;
+    --primary: #bd93f9;
+    --primary-hover: #cdaafa;
+    --primary-contrast: #1c1324;
+    --danger: #ff5555;
+    --success: #50fa7b;
+    --warning: #ffb86c;
+    --purple: #bd93f9;
+    --pink: #ff79c6;
+    --info: #8be9fd;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 10px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
     --shadow-lg: 0 16px 32px rgba(0, 0, 0, 0.45), 0 4px 10px rgba(0, 0, 0, 0.35);
   }
+}
+
+:root[data-theme="dark"] {
+  --bg: #282a36;
+  --surface: #343746;
+  --surface-alt: #21222c;
+  --border: #44475a;
+  --text: #f8f8f2;
+  --text-muted: #6272a4;
+  --primary: #bd93f9;
+  --primary-hover: #cdaafa;
+  --primary-contrast: #1c1324;
+  --danger: #ff5555;
+  --success: #50fa7b;
+  --warning: #ffb86c;
+  --purple: #bd93f9;
+  --pink: #ff79c6;
+  --info: #8be9fd;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 10px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 16px 32px rgba(0, 0, 0, 0.45), 0 4px 10px rgba(0, 0, 0, 0.35);
 }
 
 * {
@@ -89,7 +135,7 @@ html {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, sans-serif;
+  font-family: var(--font-body);
   font-size: 15px;
   line-height: 1.55;
   color: var(--text);
@@ -122,6 +168,8 @@ main {
 }
 
 h1, h2, h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
   line-height: 1.25;
   letter-spacing: -0.01em;
 }
@@ -157,7 +205,7 @@ a:hover {
 }
 
 code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -166,58 +214,188 @@ code {
   color: var(--text);
 }
 
-/* Nav */
-nav {
+/* Nav shell: a desktop sidebar + a mobile hamburger/slide-out drawer, both
+   rendering the same set of links from base.html. .app-shell is the flex
+   row (sidebar + main content); the sidebar collapses into the drawer
+   pattern below a 768px breakpoint rather than the old flat top bar that
+   just wrapped. */
+.app-shell {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  padding: 1rem 0;
-  margin: 0 0 1.5rem;
-  border-bottom: 1px solid var(--border);
+  align-items: flex-start;
+  gap: 0;
+}
+
+.icon {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+  vertical-align: middle;
+}
+
+.icon-lg {
+  width: 26px;
+  height: 26px;
+}
+
+.icon-sm {
+  width: 14px;
+  height: 14px;
+}
+
+.sidebar {
+  flex: 0 0 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  padding: 1.25rem 0.9rem;
+  background: var(--surface-alt);
+  border-right: 1px solid var(--border);
   position: sticky;
   top: 0;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  z-index: 10;
+  height: 100vh;
+  overflow-y: auto;
 }
 
-nav a {
-  color: var(--text-muted);
-  font-weight: 500;
-  font-size: 0.92rem;
-  padding: 0.45rem 0.75rem;
-  border-radius: var(--radius-sm);
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-nav a:hover {
-  color: var(--text);
-  background: var(--surface-alt);
-  text-decoration: none;
-}
-
-nav a.active {
-  color: var(--text);
-  background: var(--surface-alt);
-}
-
-nav a.brand {
+.side-brand {
   display: flex;
   align-items: center;
-  margin-right: 0.5rem;
-  padding: 0.3rem 0.5rem;
+  gap: 0.6rem;
+  padding: 0 0.4rem;
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--primary);
 }
 
-nav a.brand img {
-  height: 28px;
+.side-brand img {
+  height: 26px;
   width: auto;
   display: block;
 }
 
-nav a.brand:hover {
+.sidebar nav, .drawer nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+}
+
+.sidebar nav a, .drawer nav a {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.87rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sidebar nav a:hover, .drawer nav a:hover {
+  color: var(--text);
+  background: var(--surface);
+  text-decoration: none;
+}
+
+.sidebar nav a.active, .drawer nav a.active {
+  color: var(--primary-contrast);
+  background: var(--primary);
+}
+
+.side-foot {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  padding: 0 0.4rem;
+}
+
+/* Theme switch (Light/Dark/System - see the inline script in base.html's
+   <head> that applies the saved choice before first paint). */
+.theme-switch {
+  display: flex;
+  gap: 2px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 3px;
+}
+
+.theme-switch button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  flex: 1;
+  border: none;
   background: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 0.4rem 0.3rem;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.theme-switch button.active {
+  background: var(--primary);
+  color: var(--primary-contrast);
+}
+
+/* Mobile top bar + hamburger - hidden entirely on wider screens (see the
+   768px breakpoint at the bottom of this file), where the sidebar above is
+   always visible instead. */
+.mobile-topbar {
+  display: none;
+}
+
+.hamburger {
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  padding: 0.45rem;
+  min-width: 2.3rem;
+  min-height: 2.3rem;
+}
+
+.drawer-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, black 40%, transparent);
+  z-index: 50;
+}
+
+.drawer-backdrop.open {
+  display: flex;
+}
+
+.drawer {
+  width: min(78vw, 280px);
+  height: 100%;
+  background: var(--surface-alt);
+  border-right: 1px solid var(--border);
+  padding: 1.1rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  overflow-y: auto;
+}
+
+.drawer .side-brand {
+  justify-content: space-between;
+}
+
+.drawer-close {
+  margin-left: auto;
 }
 
 /* Footer */
@@ -237,6 +415,18 @@ footer a {
 
 footer a:hover {
   color: var(--text);
+}
+
+.demo-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) var(--tint-medium), transparent);
+  border-radius: var(--radius-pill);
+  padding: 0.1rem 0.5rem;
 }
 
 /* Buttons */
@@ -386,7 +576,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 .yaml-editor {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.85rem;
   white-space: pre;
 }
@@ -645,6 +835,138 @@ li[data-loc-key].loc-glow {
   text-shadow: 0 0 6px var(--dot-color), 0 0 12px var(--dot-color);
 }
 
+/* Devices page "Last locate result" - each <li> now carries its own Map
+   popover (merged in from the old separate Map column, see
+   devices/_locate_cell.html) and pings past the first couple collapse
+   behind a "+N more pings" <details>, the same disclosure idiom as
+   .device-details below. */
+.ping-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.map-menu-wrap {
+  /* Reset the generic `details {}` card chrome (background/border/padding/
+     shadow/margin-top) below - this is a small inline pill trigger, not
+     another nested card, and left un-reset it doubled up with the pill
+     styling on its own <summary> below (a bordered, padded box around a
+     bordered, padded pill). */
+  position: relative;
+  display: inline-block;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 0;
+  box-shadow: none;
+}
+
+.map-menu-wrap summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  box-shadow: none;
+  margin: 0;
+}
+
+.map-menu-wrap summary::-webkit-details-marker {
+  display: none;
+}
+
+.map-menu-wrap[open] summary {
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border-color: transparent;
+}
+
+.map-menu {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  left: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 9.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 0.3rem;
+  margin: 0;
+}
+
+.map-menu a {
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.map-menu a:hover {
+  background: var(--surface-alt);
+  text-decoration: none;
+}
+
+.ping-overflow {
+  margin-top: 0.3rem;
+  padding: 0;
+  background: none;
+  border: none;
+  box-shadow: none;
+}
+
+.ping-overflow summary {
+  color: var(--primary);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.ping-overflow .ping-row {
+  margin-top: 0.4rem;
+}
+
+/* A quiet, derived freshness indicator (webui/staleness.py's
+   display_status) - separate from the Staleness page's opt-in alerting,
+   this just reflects how old the newest ping is. */
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-pill);
+  margin-bottom: 0.3rem;
+}
+
+.status-chip i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  display: block;
+}
+
+.status-chip--fresh {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) var(--tint-medium), transparent);
+}
+
+.status-chip--stale {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) var(--tint-medium), transparent);
+}
+
 /* Details / diagnostics */
 details {
   background: var(--surface);
@@ -765,7 +1087,7 @@ details ul {
    explicitly since a div doesn't default to either the way a textarea
    does. */
 .url-input[contenteditable] {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.85rem;
   line-height: 1.4;
   white-space: pre-wrap;
@@ -1138,6 +1460,13 @@ details ul {
 }
 
 .device-details {
+  /* Same reset as .map-menu-wrap above, and for the same reason - this is a
+     quiet inline disclosure inside a table cell/card, not another nested
+     card on top of the one it already lives in. */
+  background: none;
+  border: none;
+  padding: 0;
+  box-shadow: none;
   margin-top: 0.3rem;
   font-size: 0.8rem;
   color: var(--text-muted);
@@ -1169,6 +1498,9 @@ details ul {
   /* Background at 80% opacity, but the border stays fully opaque - a
      color-mix on the border too would fade it out along with the fill and
      leave the button's edge looking washed out against the table row. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: color-mix(in srgb, var(--surface) 80%, transparent);
   color: var(--text-muted);
   border: 1px solid var(--border);
@@ -1220,7 +1552,7 @@ details ul {
 }
 
 .body-textarea {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.85rem;
   min-height: 6rem;
   resize: vertical;
@@ -1235,7 +1567,7 @@ details ul {
 }
 
 .chip {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.76rem;
   font-weight: 500;
   color: var(--primary);
@@ -1254,7 +1586,7 @@ details ul {
 
 /* Request preview */
 .preview-block {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.83rem;
   line-height: 1.7;
   background: var(--surface-alt);
@@ -1521,6 +1853,37 @@ details ul {
   color: var(--text-muted);
 }
 
+/* Severity-as-a-stripe: the Logs table is hard-capped at 500 rows
+   server-side (see webui/routers/logs.py) so it's always a long, dense
+   list regardless of screen size - a left stripe keyed off the existing
+   .log-* pill (already on the Level cell) lets severity read before the
+   text does, without changing the row/cell markup itself. :has() scopes
+   this to rows that actually contain one of these pills, so it has no
+   effect on the Devices table, which also uses .sortable-table. */
+.sortable-table tbody tr:has(.log-error) td:first-child,
+.sortable-table tbody tr:has(.log-critical) td:first-child {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
+.sortable-table tbody tr:has(.log-warning) td:first-child {
+  box-shadow: inset 3px 0 0 var(--warning);
+}
+
+.sortable-table tbody tr:has(.log-ok) td:first-child {
+  box-shadow: inset 3px 0 0 var(--success);
+}
+
+.sortable-table tbody tr:has(.log-skipped) td:first-child {
+  box-shadow: inset 3px 0 0 var(--border);
+}
+
+table[data-table-id="logs"] tbody tr td:first-child {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 /* Staleness page - a device with tracking off is still listed (so turning
    it on is one click away), just visually dimmed rather than hidden. */
 .staleness-row--disabled {
@@ -1611,4 +1974,185 @@ details ul {
   color: var(--text-muted);
   font-size: 0.8rem;
   margin-top: 0.15rem;
+}
+
+/* Only meaningful once the mobile card reflow below hides <thead> (this
+   column's only label otherwise) - see devices/_table.html. */
+.mobile-label {
+  display: none;
+}
+
+/* Mobile nav: the sidebar (desktop) gives way to a top bar + hamburger-
+   opened slide-out drawer below 768px - same 6 links either way (see
+   base.html). Devices/Staleness's table-to-card reflow lives alongside the
+   templates that gained the data-col attributes it targets. */
+@media (max-width: 768px) {
+  .sidebar {
+    display: none;
+  }
+
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    padding: 0.7rem 0;
+    margin: 0 0 1rem;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 10;
+  }
+
+  .mobile-topbar .side-brand {
+    padding: 0;
+  }
+
+  .app-shell {
+    flex-direction: column;
+  }
+}
+
+@media (min-width: 769px) {
+  .drawer-backdrop {
+    display: none !important;
+  }
+}
+
+/* Devices/Staleness as cards on a phone - same <table>/<tr>/<td> markup as
+   desktop (every hx-target, OOB-swap id, and tables.js DOM query stays
+   exactly as it is; see devices/_table.html's data-col attributes, which
+   mirror the existing <th data-col> convention tables.js's column-hide
+   feature already relies on), just reflowed with CSS instead of a second,
+   duplicated card markup that would need its own parallel set of ids. Logs
+   deliberately isn't included here - it's hard-capped at 500 rows
+   server-side (see webui/routers/logs.py), so it's always a long dense
+   list regardless of screen size, and stays a real table/list at every
+   breakpoint (see the severity-stripe rules above). */
+@media (max-width: 768px) {
+  table[data-table-id="devices"],
+  table[data-table-id="staleness"] {
+    table-layout: auto !important; /* overrides tables.js's own inline table-layout:fixed/column widths */
+    min-width: 0 !important; /* overrides .table-scroll table's 40rem floor below - that's for a real wide table, not this card stack */
+  }
+
+  table[data-table-id="devices"] thead,
+  table[data-table-id="staleness"] thead {
+    display: none;
+  }
+
+  table[data-table-id="devices"] tbody,
+  table[data-table-id="staleness"] tbody {
+    display: block;
+    width: 100%;
+  }
+
+  /* One flex-wrap row per device/row, not a flex column - a column forces
+     every cell onto its own line with no way for short ones (Last seen,
+     Endpoints, Polled at) to share one. Each cell defaults to flex-basis:
+     100% (its own full-width line); the three short metadata cells below
+     opt out of that so they pack onto one compact, wrapped line instead of
+     three skinny ones. One `gap` on the row is the only spacing rule now -
+     no more per-cell margins fighting each other. */
+  table[data-table-id="devices"] tbody tr,
+  table[data-table-id="staleness"] tbody tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem 0.5rem;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow);
+  }
+
+  table[data-table-id="devices"] tbody tr:last-child,
+  table[data-table-id="staleness"] tbody tr:last-child {
+    margin-bottom: 0;
+  }
+
+  table[data-table-id="devices"] td,
+  table[data-table-id="staleness"] td {
+    display: block;
+    flex: 1 1 100%;
+    width: auto !important; /* overrides tables.js's own inline per-column width */
+    border: none;
+    padding: 0 !important;
+    margin: 0;
+  }
+
+  /* The "No devices/staleness entries found" colspan row shouldn't get
+     per-cell card chrome. */
+  table[data-table-id="devices"] td[colspan],
+  table[data-table-id="staleness"] td[colspan] {
+    padding: 0.4rem 0 !important;
+  }
+
+  table[data-table-id="devices"] td[data-col="name"] {
+    order: 1;
+    font-weight: 700;
+    font-size: 1.05rem;
+  }
+  table[data-table-id="devices"] td[data-col="alias"] {
+    order: 2;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+  }
+  /* Freshness + where it is, right under the name/alias header - the most
+     important thing a phone-in-hand check wants, ahead of device-type
+     trivia and metadata further down. */
+  table[data-table-id="devices"] td[data-col="locate_result"] { order: 3; }
+  table[data-table-id="devices"] td[data-col="device"] { order: 4; }
+  /* Last seen / Endpoints / Polled at: one compact wrapped line of quiet
+     metadata instead of three separate stacked rows - each only forces its
+     own line if it doesn't fit next to its neighbors. */
+  table[data-table-id="devices"] td[data-col="last_seen"],
+  table[data-table-id="devices"] td[data-col="endpoints"],
+  table[data-table-id="devices"] td[data-col="polled_at"] {
+    order: 5;
+    flex: 0 1 auto;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+  }
+  table[data-table-id="devices"] td[data-col="endpoints"]::before,
+  table[data-table-id="devices"] td[data-col="polled_at"]::before {
+    content: "·";
+    margin-right: 0.45em;
+  }
+  table[data-table-id="devices"] td[data-col="next_poll"] {
+    order: 6;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+  table[data-table-id="devices"] td[data-col="actions"] {
+    order: 7;
+    padding-top: 0.75rem !important;
+    margin-top: 0.1rem;
+    border-top: 1px solid var(--border) !important;
+  }
+
+  .mobile-label {
+    display: inline;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin-right: 0.35em;
+  }
+
+  /* Status chip sits right at the top of the locate-result cell already
+     (see devices/_table.html) - no extra bottom margin needed now that the
+     row's own `gap` spaces every cell consistently. */
+  table[data-table-id="devices"] .status-chip {
+    margin-bottom: 0;
+  }
+
+  /* Staleness has no data-col (no column-hide feature on this table, and
+     its natural source order - Device, Status, Last update, Configure - is
+     already a sensible card reading order with no reordering needed). */
+  table[data-table-id="staleness"] td {
+    flex-basis: 100%;
+  }
 }

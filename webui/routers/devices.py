@@ -6,11 +6,11 @@ from fastapi import APIRouter, Request
 from NovaApi.ListDevices.nbe_list_devices import request_device_list
 from ProtoDecoders.decoder import get_device_details, parse_device_list_protobuf
 from SpotApi.UploadPrecomputedPublicKeyIds.upload_precomputed_public_key_ids import refresh_custom_trackers
-from webui import demo_data, demo_mode, device_location_store, scheduler, settings_store
+from webui import demo_data, demo_mode, device_location_store, scheduler, settings_store, staleness
 from webui.auth_state import is_logged_in
 from webui.deps import run_blocking
 from webui.device_list_cache import device_list_cache
-from webui.forwarders import config_store
+from webui.forwarders import config_store, latest_values_store
 from webui.templating import templates
 
 router = APIRouter()
@@ -163,15 +163,27 @@ async def get_devices() -> list[dict]:
         # forwarding config _next_poll above already reads per device.
         device_cfg = config_store.get_device_config(canonic_id)
         last_locations = last["locations"] if last else None
-        if last_locations and most_recent_only_display:
-            last_locations = device_location_store.most_recent_only(last_locations)
+        if last_locations:
+            # Newest first - the stored order isn't guaranteed chronological
+            # (see sort_newest_first's own docstring), and the Devices page
+            # now always shows just the newest ping with the rest collapsed
+            # behind "+N more" (see devices/_locate_cell.html), so this has
+            # to be right regardless of the most-recent-only display toggle.
+            last_locations = device_location_store.sort_newest_first(last_locations)
+            if most_recent_only_display:
+                last_locations = device_location_store.most_recent_only(last_locations)
         # Sharing/ownership info (see ProtoDecoders.decoder.get_device_details)
         # - "Owner only" for the common case (just your own account, isOwner
         # true) rather than listing yourself back to yourself.
         shared_with = [a["email"] for a in detail["access"] if not a["this_account"]]
+        # Quiet freshness chip (webui/staleness.py's display_status) - not
+        # this device's opt-in alerting status (most devices never configure
+        # that, see default_staleness), just "how old is the newest ping".
+        staleness_cfg = latest_values_store.get_device_staleness(canonic_id)
         devices.append({
             "name": detail["name"],
             "canonic_id": canonic_id,
+            "staleness_display": staleness.display_status(canonic_id, staleness_cfg),
             # Lets webui/tracked_registrations.py's matching exclude phones
             # up front - a registered tracker's identity should never
             # legitimately collide with one, but there's no reason to risk

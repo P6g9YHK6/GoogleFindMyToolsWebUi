@@ -1,5 +1,5 @@
 {% if ok %}
-<span class="action-status action-status--ok" aria-hidden="true">✓</span>
+<span class="action-status action-status--ok" aria-hidden="true"><svg class="icon icon-sm"><use href="#i-check"/></svg></span>
 {% else %}
-<span class="action-status action-status--error" title="{{ error }}">⚠</span>
+<span class="action-status action-status--error" title="{{ error }}"><svg class="icon icon-sm"><use href="#i-alert"/></svg></span>
 {% endif %}

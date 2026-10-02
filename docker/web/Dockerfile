@@ -1,4 +1,19 @@
 # Build context is the repo root: docker build -f docker/web/Dockerfile .
+
+# Minifies webui/static/*.css|js and vendors htmx/Leaflet/webfonts locally
+# (see package.json, scripts/copy-vendor.mjs) instead of the old unpkg.com
+# CDN tags in base.html - this is the only place Node touches this image, the
+# output (webui/static/dist/, webui/static/vendor/) is plain static files
+# copied into the real runtime stage below, and Node itself never ships in
+# the final image.
+FROM node:20-slim AS assets
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY webui/static ./webui/static
+COPY scripts/copy-vendor.mjs ./scripts/copy-vendor.mjs
+RUN npm run build
+
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -39,6 +54,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY . /app
+# Built assets land after the plain COPY above so they always win over
+# whatever (if anything) is checked in at these paths - see .gitignore.
+COPY --from=assets /app/webui/static/dist /app/webui/static/dist
+COPY --from=assets /app/webui/static/vendor /app/webui/static/vendor
 
 # GFMT_SECRETS_DIR is deliberately not set here - Auth/token_cache.py falls
 # back to GFMT_DATA_DIR when it's unset, so everything we expect you to back

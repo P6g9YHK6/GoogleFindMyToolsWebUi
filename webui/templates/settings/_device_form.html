@@ -61,7 +61,7 @@
                 hx-get="/settings/devices/{{ row.canonic_id }}"
                 hx-target="closest .device-editor" hx-swap="innerHTML"
                 hx-confirm="Discard unsaved changes to this device?">Revert</button>
-        {% if row.saved %}<span class="save-toast">✓ Saved</span>{% endif %}
+        {% if row.saved %}<span class="save-toast"><svg class="icon icon-sm"><use href="#i-check"/></svg> Saved</span>{% endif %}
       </span>
     </div>
   </fieldset>

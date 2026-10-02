@@ -1,25 +1,25 @@
 {% from "_macros.html" import columns_menu %}
 {{ columns_menu([
   ("name", "Name"), ("alias", "Alias"), ("device", "Device"), ("actions", "Actions"),
-  ("locate_result", "Last locate result"), ("map", "Map"), ("last_seen", "Last seen by find hub"),
+  ("locate_result", "Last locate result"), ("last_seen", "Last seen by find hub"),
   ("endpoints", "Endpoints"), ("polled_at", "Polled at"), ("next_poll", "Next poll"),
 ]) }}
 <div class="table-scroll">
 <table class="sortable-table" data-table-id="devices">
   <thead>
     <tr>
-      <th data-col="name">Name</th><th data-col="alias">Alias</th><th data-col="device">Device</th><th data-col="actions">Actions</th><th data-col="locate_result">Last locate result</th><th data-col="map">Map</th><th data-col="last_seen">Last seen by find hub</th><th data-col="endpoints">Endpoints</th><th data-col="polled_at">Polled at</th><th data-col="next_poll">Next poll</th>
+      <th data-col="name">Name</th><th data-col="alias">Alias</th><th data-col="device">Device</th><th data-col="actions">Actions</th><th data-col="locate_result">Last locate result</th><th data-col="last_seen">Last seen by find hub</th><th data-col="endpoints">Endpoints</th><th data-col="polled_at">Polled at</th><th data-col="next_poll">Next poll</th>
     </tr>
   </thead>
   <tbody>
   {% for device in devices %}
     <tr>
-      <td>{{ device.name }}</td>
+      <td data-col="name">{{ device.name }}</td>
       {# The local nickname set on the Settings page (see
          webui/routers/settings.py's "Device alias" field) - blank until
          one's actually set, same as that field itself. #}
-      <td>{{ device.alias or "-" }}</td>
-      <td class="device-cell">
+      <td data-col="alias">{{ device.alias or "-" }}</td>
+      <td class="device-cell" data-col="device">
         {# Category/photo straight from Google's own response - see
            ProtoDecoders.decoder.get_device_details and
            webui/routers/devices.py's _device_type_label. Manufacturer/
@@ -57,19 +57,19 @@
           </details>
         {% endif %}
       </td>
-      <td class="actions-cell">
+      <td class="actions-cell" data-col="actions">
         <button type="button" class="btn-icon" title="Locate"
                 hx-post="/devices/{{ device.canonic_id }}/locate?name={{ device.name | urlencode }}"
                 hx-target="#locate-result-{{ loop.index }}" hx-swap="innerHTML"
-                hx-indicator="#action-spinner-{{ device.canonic_id }}">📍</button>
+                hx-indicator="#action-spinner-{{ device.canonic_id }}"><svg class="icon"><use href="#i-crosshair"/></svg></button>
         <button type="button" class="btn-icon" title="Play sound"
                 hx-post="/devices/{{ device.canonic_id }}/sound/start"
                 hx-target="#sound-status-{{ device.canonic_id }}" hx-swap="innerHTML"
-                hx-indicator="#action-spinner-{{ device.canonic_id }}">🔊</button>
+                hx-indicator="#action-spinner-{{ device.canonic_id }}"><svg class="icon"><use href="#i-volume"/></svg></button>
         <button type="button" class="btn-icon" title="Stop sound"
                 hx-post="/devices/{{ device.canonic_id }}/sound/stop"
                 hx-target="#sound-status-{{ device.canonic_id }}" hx-swap="innerHTML"
-                hx-indicator="#action-spinner-{{ device.canonic_id }}">🔇</button>
+                hx-indicator="#action-spinner-{{ device.canonic_id }}"><svg class="icon"><use href="#i-mute"/></svg></button>
         {# Shared by all three buttons above - htmx shows/hides this
            automatically while any of their requests is in flight, via its
            own "htmx-indicator" class (auto-injected opacity rules; see
@@ -80,35 +80,40 @@
            location data, not just a pass/fail glyph. #}
         <span id="sound-status-{{ device.canonic_id }}" class="action-status"></span>
       </td>
-      <td id="locate-result-{{ loop.index }}">
+      <td id="locate-result-{{ loop.index }}" data-col="locate_result">
+        {% set status = device.staleness_display %}
+        {% if status and status.state == "fresh" %}
+          <span class="status-chip status-chip--fresh"><i></i>Fresh</span>
+        {% elif status and status.state == "stale" %}
+          <span class="status-chip status-chip--stale"><i></i>Stale</span>
+        {% endif %}
         {% set canonic_id = device.canonic_id %}
         {% set name = device.name %}
         {% set locations = device.last_locations %}
         {% set fetched_at_str = device.last_fetched_at_str %}
         {% include "devices/_locate_cell.html" %}
       </td>
-      <td id="map-links-{{ device.canonic_id }}">
-        {% include "devices/_map_links_cell.html" %}
-      </td>
       {# Phone-only (Spot/BLE tags never have this) - see
          ProtoDecoders/decoder.py:get_last_seen. #}
-      <td>{{ device.last_seen_str or "-" }}</td>
-      <td>{{ device.endpoint_count }}</td>
+      {# .mobile-label is only shown in the card reflow below 768px, where
+         the <thead> (this column's only label otherwise) is hidden. #}
+      <td data-col="last_seen"><span class="mobile-label">Seen by Find Hub:</span>{{ device.last_seen_str or "-" }}</td>
+      <td data-col="endpoints"><span class="mobile-label">Endpoints:</span>{{ device.endpoint_count }}</td>
       {# Per-fetch metadata, not per-location - its own column (updated via
-         the same OOB swap as the Map column - see _locate_cell.html) rather
-         than a line inside the "Last locate result" cell, which used to
-         throw off that column's row-for-row alignment with Map's. #}
-      <td id="polled-at-{{ device.canonic_id }}">{{ device.last_fetched_at_str or "-" }}</td>
-      <td>
+         the same OOB swap as the Polled-at target - see _locate_cell.html)
+         rather than a line inside the "Last locate result" cell, which used
+         to throw off that column's row-for-row alignment. #}
+      <td id="polled-at-{{ device.canonic_id }}" data-col="polled_at"><span class="mobile-label">Polled:</span>{{ device.last_fetched_at_str or "-" }}</td>
+      <td data-col="next_poll">
         {{ device.next_poll_str or "Not scheduled" }}
-        · <a href="/settings#device-{{ device.canonic_id }}">Edit</a>
+        · <a href="/settings#device-{{ device.canonic_id }}"><svg class="icon icon-sm"><use href="#i-edit"/></svg>Edit</a>
         {% if device.next_poll_ts %}
           <br><span class="next-poll-countdown" data-next-poll-ts="{{ device.next_poll_ts }}"></span>
         {% endif %}
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="10">No devices found.</td></tr>
+    <tr><td colspan="9">No devices found.</td></tr>
   {% endfor %}
   </tbody>
 </table>
