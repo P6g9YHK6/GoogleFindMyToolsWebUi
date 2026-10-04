@@ -16,7 +16,7 @@
   </span>
 {% endmacro %}
 
-<div class="device-grid">
+<div class="device-grid" data-reorder-key="staleness">
 {% for row in rows %}
   {% set status = row.status %}
   <div class="device-card{% if not status.enabled %} staleness-row--disabled{% endif %}"
@@ -24,19 +24,22 @@
        data-muted="{{ '1' if status.muted else '0' }}" data-threshold-s="{{ status.threshold_s or '' }}">
     <div class="device-card-head">
       <b class="device-card-name">{{ row.name }}</b>
-      <span class="staleness-status">
-        {% if not status.enabled %}
-          <span class="log-skipped">Tracking off</span>
-        {% elif status.muted %}
-          <span class="log-skipped">Muted</span>
-        {% elif not status.has_data %}
-          <span class="log-skipped">No data yet</span>
-        {% elif status.is_stale %}
-          <span class="log-error">Stale</span>
-        {% else %}
-          <span class="log-ok">Fresh</span>
-        {% endif %}
-      </span>
+      <div class="device-card-head-right">
+        <span class="staleness-status">
+          {% if not status.enabled %}
+            <span class="log-skipped">Tracking off</span>
+          {% elif status.muted %}
+            <span class="log-skipped">Muted</span>
+          {% elif not status.has_data %}
+            <span class="log-skipped">No data yet</span>
+          {% elif status.is_stale %}
+            <span class="log-error">Stale</span>
+          {% else %}
+            <span class="log-ok">Fresh</span>
+          {% endif %}
+        </span>
+        <button type="button" class="card-drag-handle" aria-label="Drag to reorder" title="Drag to reorder"></button>
+      </div>
     </div>
 
     <div class="device-card-meta">

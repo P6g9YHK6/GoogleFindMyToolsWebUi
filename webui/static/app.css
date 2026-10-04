@@ -223,6 +223,50 @@ h1 {
   flex: none;
 }
 
+.device-card-head-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: none;
+}
+
+.card-drag-handle {
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  width: 1.4rem;
+  height: 1.4rem;
+  color: var(--text-muted);
+  cursor: grab;
+  touch-action: none;
+  flex: none;
+}
+
+.card-drag-handle::before {
+  content: "⠿";
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.card-drag-handle:hover:not(:disabled) {
+  background: none;
+  color: var(--text);
+}
+
+.device-card.card-dragging {
+  opacity: 0.5;
+}
+
+body.card-reordering {
+  cursor: grabbing !important;
+}
+
+body.card-reordering * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
 .device-card-name {
   font-size: 1rem;
 }

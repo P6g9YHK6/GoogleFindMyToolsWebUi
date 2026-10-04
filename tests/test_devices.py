@@ -17,8 +17,8 @@ def test_devices_table_logged_in(client):
 def test_devices_table_is_a_card_grid(client):
     resp = client.get("/devices/table")
     assert resp.status_code == 200
-    assert '<div class="device-grid">' in resp.text
-    assert '<div class="device-card">' in resp.text
+    assert 'class="device-grid"' in resp.text
+    assert 'class="device-card"' in resp.text
 
 
 def test_devices_table_shows_alias_and_endpoint_count(client, tmp_path, monkeypatch):

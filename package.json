@@ -13,7 +13,7 @@
   "scripts": {
     "build:vendor": "node scripts/copy-vendor.mjs",
     "build:css": "esbuild webui/static/app.css --minify --outfile=webui/static/dist/app.css",
-    "build:js": "esbuild webui/static/app.js webui/static/tables.js webui/static/endpoint_fields.js webui/static/firmware.js webui/static/provision.js webui/static/debug_export.js --minify --outdir=webui/static/dist",
+    "build:js": "esbuild webui/static/app.js webui/static/tables.js webui/static/card_reorder.js webui/static/endpoint_fields.js webui/static/firmware.js webui/static/provision.js webui/static/debug_export.js --minify --outdir=webui/static/dist",
     "build": "npm run build:vendor && npm run build:css && npm run build:js"
   }
 }

@@ -1,17 +1,20 @@
-<div class="device-grid">
+<div class="device-grid" data-reorder-key="devices">
 {% for device in devices %}
-  <div class="device-card">
+  <div class="device-card" data-canonic-id="{{ device.canonic_id }}">
     <div class="device-card-head">
       <div>
         <b class="device-card-name">{{ device.name }}</b>
         {% if device.alias %}<span class="device-card-alias">{{ device.alias }}</span>{% endif %}
       </div>
-      {% set status = device.staleness_display %}
-      {% if status and status.state == "fresh" %}
-        <span class="status-chip status-chip--fresh"><i></i>Fresh</span>
-      {% elif status and status.state == "stale" %}
-        <span class="status-chip status-chip--stale"><i></i>Stale</span>
-      {% endif %}
+      <div class="device-card-head-right">
+        {% set status = device.staleness_display %}
+        {% if status and status.state == "fresh" %}
+          <span class="status-chip status-chip--fresh"><i></i>Fresh</span>
+        {% elif status and status.state == "stale" %}
+          <span class="status-chip status-chip--stale"><i></i>Stale</span>
+        {% endif %}
+        <button type="button" class="card-drag-handle" aria-label="Drag to reorder" title="Drag to reorder"></button>
+      </div>
     </div>
 
     <div class="device-summary">
