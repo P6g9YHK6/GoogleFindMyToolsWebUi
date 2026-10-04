@@ -54,23 +54,34 @@ def _location_key(loc: dict) -> tuple:
 def most_recent_only(locations: list[dict]) -> list[dict]:
     """Just the reading(s) with the latest "time" in this list - all of them
     if several share that exact max (no further way to break the tie), or
-    the list unchanged if nothing in it has a "time" at all. The wire order
-    Google returns isn't guaranteed to be chronological - decrypt_locations.py
-    appends the single "recentLocation" reading after the (unordered)
-    networkLocations list, so it can land anywhere, including last - so this
-    picks by actual max time rather than trusting list order/position. Used
-    for *display* (the Devices page's "Last locate result" column and its
-    map pin, per webui/routers/devices.py and webui/routers/locate.py -
-    unconditional, Google can return several readings per response but the
-    page only ever shows the newest) - unrelated to forwarding's own
-    per-endpoint only_most_recent toggle (see webui/forwarders/policy.py's
-    _skip_not_most_recent), which decides what gets sent to an endpoint, not
-    what gets shown on this page."""
+    the list unchanged if nothing in it has a "time" at all. Used by
+    webui/forwarders/settings_service.py's device-preview (one fix to show
+    sample values from) - unrelated to forwarding's own per-endpoint
+    only_most_recent toggle (see webui/forwarders/policy.py's
+    _skip_not_most_recent), which decides what gets sent to an endpoint, and
+    to sort_newest_first below, which the Devices page uses instead (it
+    shows every reading, newest first, not just the single latest one)."""
     times: list[int] = [loc["time"] for loc in locations if loc.get("time") is not None]
     if not times:
         return locations
     newest = max(times)
     return [loc for loc in locations if loc.get("time") == newest]
+
+
+def sort_newest_first(locations: list[dict]) -> list[dict]:
+    """Newest reading first. The wire order Google returns isn't guaranteed
+    to be chronological - decrypt_locations.py appends the single
+    "recentLocation" reading after the (unordered) networkLocations list, so
+    it can land anywhere, including last - so display code that cares which
+    one is "the latest" (the Devices page's always-expanded ping, and the
+    map pin numbering that has to agree with it) sorts explicitly rather
+    than trusting list order. A location with no "time" sorts last, not
+    first - safer than treating "unknown" as "newest"."""
+    def _time_key(loc: dict) -> int:
+        time_value = loc.get("time")
+        return time_value if time_value is not None else -1
+
+    return sorted(locations, key=_time_key, reverse=True)
 
 
 def get_last_location(canonic_id: str) -> dict | None:

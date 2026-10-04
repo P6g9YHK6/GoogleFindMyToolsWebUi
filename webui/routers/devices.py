@@ -157,12 +157,12 @@ async def get_devices() -> list[dict]:
         # many forwarding endpoints are configured, straight off the same
         # forwarding config _next_poll above already reads per device.
         device_cfg = config_store.get_device_config(canonic_id)
-        # Just the newest reading, and only its map pin - Google can return
-        # several in one response, but the page only ever shows the latest
-        # (see device_location_store.most_recent_only's own docstring).
+        # Newest first - Google can bundle several readings in one response,
+        # not necessarily in chronological order (see
+        # device_location_store.sort_newest_first's own docstring).
         last_locations = last["locations"] if last else None
         if last_locations:
-            last_locations = device_location_store.most_recent_only(last_locations)
+            last_locations = device_location_store.sort_newest_first(last_locations)
         # Sharing/ownership info (see ProtoDecoders.decoder.get_device_details)
         # - "Owner only" for the common case (just your own account, isOwner
         # true) rather than listing yourself back to yourself.

@@ -95,10 +95,11 @@ def test_devices_table_prepopulates_from_a_prior_locate_no_click_needed(client, 
     assert datetime.fromtimestamp(1700000000).strftime("%Y-%m-%d %H:%M:%S") in resp.text
 
 
-def test_devices_table_shows_only_the_most_recent_reading(client, tmp_path, monkeypatch):
-    """Google can return several readings in one response - the Devices page
-    only ever shows the newest (see device_location_store.most_recent_only),
-    unconditionally, not as a toggle-able preference."""
+def test_devices_table_shows_the_newest_reading_first_with_the_rest_collapsed(client, tmp_path, monkeypatch):
+    """Google can return several readings in one response, not necessarily
+    in chronological order - the Devices page sorts them newest-first (see
+    device_location_store.sort_newest_first) and shows just the newest
+    inline, with the rest behind a "+N more pings" disclosure."""
     from webui import config, device_location_store
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
@@ -116,7 +117,10 @@ def test_devices_table_shows_only_the_most_recent_reading(client, tmp_path, monk
     resp = client.get("/devices/table")
     assert resp.status_code == 200
     assert "12.50000, 34.50000" in resp.text
-    assert "1.00000, 2.00000" not in resp.text
+    assert "+1 more ping" in resp.text
+    # Still in the response (inside the collapsed <details>), not dropped.
+    assert "1.00000, 2.00000" in resp.text
+    assert resp.text.index("12.50000, 34.50000") < resp.text.index("1.00000, 2.00000")
 
 
 def test_devices_table_shows_map_links_for_every_provider(client, tmp_path, monkeypatch):

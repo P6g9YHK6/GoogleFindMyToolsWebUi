@@ -53,11 +53,11 @@ async def locate(request: Request, canonic_id: str, name: str = ""):
     # Display-only, same as webui/routers/devices.py's page-load table - the
     # full `locations` list above is what's actually persisted; this is just
     # what's shown/broadcast, so the manual click and the page-load table
-    # never disagree with each other. Just the newest reading - see
-    # device_location_store.most_recent_only's own docstring.
+    # never disagree with each other. Newest first - see
+    # device_location_store.sort_newest_first's own docstring.
     display_locations = locations
     if display_locations:
-        display_locations = device_location_store.most_recent_only(display_locations)
+        display_locations = device_location_store.sort_newest_first(display_locations)
 
     await manager.broadcast({
         "type": "locate_result",

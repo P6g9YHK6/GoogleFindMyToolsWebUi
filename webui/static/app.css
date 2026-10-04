@@ -988,6 +988,24 @@ li[data-loc-key].loc-glow {
   text-decoration: none;
 }
 
+.ping-overflow {
+  margin-top: 0.3rem;
+  padding: 0;
+  background: none;
+  border: none;
+  box-shadow: none;
+}
+
+.ping-overflow summary {
+  color: var(--primary);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.ping-overflow .ping-row {
+  margin-top: 0.4rem;
+}
+
 /* A quiet, derived freshness indicator (webui/staleness.py's
    display_status) - separate from the Staleness page's opt-in alerting,
    this just reflects how old the newest ping is. */

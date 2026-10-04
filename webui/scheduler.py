@@ -179,11 +179,11 @@ async def _poll_device(canonic_id: str):
         if due_indices:
             # Display-only - forwarding above already saw the full
             # `locations`; this is just what's broadcast to the Devices
-            # page's live map pins. Just the newest reading - see
-            # device_location_store.most_recent_only's own docstring.
+            # page's live map pins. Newest first - see
+            # device_location_store.sort_newest_first's own docstring.
             display_locations = locations
             if display_locations:
-                display_locations = device_location_store.most_recent_only(display_locations)
+                display_locations = device_location_store.sort_newest_first(display_locations)
             await ws.manager.broadcast({
                 "type": "locate_result",
                 "canonic_id": canonic_id,

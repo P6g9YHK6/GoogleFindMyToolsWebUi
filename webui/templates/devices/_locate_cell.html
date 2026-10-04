@@ -1,12 +1,18 @@
 {% if error %}
   <span class="form-error">Locate failed: {{ error }}</span>
 {% elif locations %}
-  {# Just the newest reading (webui/routers/devices.py and
-     webui/routers/locate.py already narrow `locations` down to it via
-     device_location_store.most_recent_only) - Google can return several
-     readings in one response, but only the latest is ever shown here. #}
+  {# locations is already newest-first (webui/routers/devices.py and
+     webui/routers/locate.py sort via device_location_store.sort_newest_first).
+     Only the newest stays inline; the rest collapse behind "+N more
+     pings". #}
+  {% set overflow_count = (locations | length - 1) if (locations | length) > 1 else 0 %}
   <ul>
   {% for loc in locations %}
+    {% if loop.index0 == 1 and overflow_count > 0 %}
+    </ul>
+    <details class="ping-overflow"><summary>+{{ overflow_count }} more ping{{ "s" if overflow_count != 1 else "" }}</summary>
+    <ul>
+    {% endif %}
     {% if loc.is_semantic %}
     <li>
         {{ loc.semantic_name }}{% if loc.latitude is not none %} (mapped){% endif %}
@@ -34,6 +40,7 @@
     {% endif %}
   {% endfor %}
   </ul>
+  {% if overflow_count > 0 %}</details>{% endif %}
 {% else %}
   <span>No location received yet.</span>
 {% endif %}
