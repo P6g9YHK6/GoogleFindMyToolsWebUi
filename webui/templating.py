@@ -1,5 +1,6 @@
 import pathlib
 import time
+from datetime import datetime
 
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
@@ -68,6 +69,16 @@ def _active_page(request: Request) -> dict:
     return {"active_page": _NAV_PAGES.get(request.url.path)}
 
 
+def ping_time(ts: int | float | None) -> str:
+    """"14:32 · 04 Oct 2026" - the hover title on a ping row (see
+    devices/_locate_cell.html). Time first since that's usually the part
+    worth a glance; the month name instead of a numeric one sidesteps the
+    DD/MM vs MM/DD ambiguity a plain "14:32 04/10/26" would have."""
+    if not ts:
+        return ""
+    return datetime.fromtimestamp(ts).strftime("%H:%M · %d %b %Y")
+
+
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"), context_processors=[_build_info, _active_page])
 # Lets the schedule editor's cron preview render inline on the initial page
 # load (settings/_endpoint_fields.html calls cron_preview(cron_value)
@@ -79,3 +90,4 @@ templates.env.globals["cron_preview"] = scheduler.cron_preview
 # its map pin (see webui/colors.py) without every caller threading the
 # color through by hand.
 templates.env.globals["location_color"] = location_color
+templates.env.globals["ping_time"] = ping_time

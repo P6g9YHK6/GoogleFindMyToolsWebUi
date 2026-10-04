@@ -14,7 +14,7 @@
     <ul>
     {% endif %}
     {% if loc.is_semantic %}
-    <li>
+    <li title="{{ ping_time(loc.time) }}">
         {{ loc.semantic_name }}{% if loc.latitude is not none %} (mapped){% endif %}
     </li>
     {% endif %}
@@ -25,7 +25,7 @@
        popover below used to be a separate table column (_map_links_cell.html,
        kept in sync only by matching this same key) - merged in here so
        there's one list to scan instead of two columns lined up by position. #}
-    <li class="ping-row" data-loc-key="{{ canonic_id }}:{{ loop.index0 }}" style="--dot-color: {{ location_color(canonic_id, loop.index0) }};">
+    <li class="ping-row" data-loc-key="{{ canonic_id }}:{{ loop.index0 }}" style="--dot-color: {{ location_color(canonic_id, loop.index0) }};" title="{{ ping_time(loc.time) }}">
         <span class="loc-dot"></span>
         <span class="mono">{{ "%.5f"|format(loc.latitude) }}, {{ "%.5f"|format(loc.longitude) }}</span>
         {% if loc.map_links %}
