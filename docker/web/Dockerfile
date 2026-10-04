@@ -81,19 +81,19 @@ COPY --from=assets /app/webui/static/vendor /app/webui/static/vendor
 ARG GFMT_BUILD_SHA=dev
 ARG GFMT_BUILD_DATE=
 ARG GFMT_BUILD_BRANCH=
-# A bare ENV substitution below has been observed serving a stale cached
-# layer from the registry buildcache even when the ARG value passed in
-# differs from the previous build (seen 2026-08-22: the footer kept showing
-# a commit from a day and several pushes earlier, despite /app itself - the
-# COPY layer above, which did invalidate correctly - having the current
-# code). Same class of stale-cache-hit bug as .github/workflows/
-# docker-publish.yml's own comment on the registry cache describes, just
-# hitting this ENV layer instead this time. RUN's cache key reliably
-# incorporates any ARG it actually references, unlike a plain ENV assignment
-# in some BuildKit versions, so this forces a real cache-key check against
-# GFMT_BUILD_SHA's resolved value and makes a stale hit here impossible
-# regardless of cause.
-RUN echo "Building ${GFMT_BUILD_SHA} (${GFMT_BUILD_BRANCH}, ${GFMT_BUILD_DATE})"
+# Written to a real file, not just an ENV - an ENV's cache key is its
+# resolved text, which should already bust a stale hit on its own, but this
+# has nonetheless been observed served stale from the registry buildcache
+# (seen 2026-08-22 and again 2026-10-04: the footer kept showing a commit
+# from a day-plus and several pushes earlier, despite /app itself having the
+# current code). A RUN that only echoes the ARGs (the previous fix attempt
+# here) produces an empty filesystem diff regardless of their value, which a
+# content-addressed cache can still treat as equivalent across builds - this
+# RUN's actual diff (the file's bytes) differs whenever the ARGs do, which a
+# content-addressed cache can't collapse into a stale hit no matter what.
+# webui/config.py reads this file, falling back to the env vars below only
+# when it's absent entirely (a non-Docker `python -m webui.serve`).
+RUN printf '%s\n%s\n%s\n' "${GFMT_BUILD_SHA}" "${GFMT_BUILD_DATE}" "${GFMT_BUILD_BRANCH}" > /app/.build_info
 ENV DISPLAY=:99 \
     GFMT_BROWSER_RUNTIME_DIR=/run/gfmt-browser \
     GFMT_DATA_DIR=/data \

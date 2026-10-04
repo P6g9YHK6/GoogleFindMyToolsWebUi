@@ -121,11 +121,25 @@ GFMT_ESP_IDF_PROVISION_TIMEOUT_S = int(os.environ.get("GFMT_ESP_IDF_PROVISION_TI
 TLS_CERT_PATH = DATA_DIR / "tls_cert.pem"
 TLS_KEY_PATH = DATA_DIR / "tls_key.pem"
 
-# Baked in at image build time - docker/web/Dockerfile,
-# .github/workflows/docker-publish.yml. "dev" = local build, no --build-arg.
-GFMT_BUILD_SHA = os.environ.get("GFMT_BUILD_SHA", "dev")
-GFMT_BUILD_DATE = os.environ.get("GFMT_BUILD_DATE", "")
-GFMT_BUILD_BRANCH = os.environ.get("GFMT_BUILD_BRANCH", "")
+# Baked in at image build time - docker/web/Dockerfile writes these to
+# .build_info (not just an ENV - see that file's own comment on why), which
+# .github/workflows/docker-publish.yml's --build-arg values flow into. "dev"
+# = local build, no --build-arg, or a plain `python -m webui.serve` outside
+# Docker entirely (no .build_info file at all, falls back to the env vars
+# below, same as before this file existed).
+def _read_build_info() -> tuple[str, str, str]:
+    build_info_path = pathlib.Path(__file__).resolve().parent.parent / ".build_info"
+    try:
+        lines = build_info_path.read_text().splitlines()
+    except OSError:
+        lines = []
+    sha = lines[0] if len(lines) > 0 and lines[0] else os.environ.get("GFMT_BUILD_SHA", "dev")
+    date = lines[1] if len(lines) > 1 else os.environ.get("GFMT_BUILD_DATE", "")
+    branch = lines[2] if len(lines) > 2 else os.environ.get("GFMT_BUILD_BRANCH", "")
+    return sha, date, branch
+
+
+GFMT_BUILD_SHA, GFMT_BUILD_DATE, GFMT_BUILD_BRANCH = _read_build_info()
 
 APP_START_TIME = time.monotonic()
 
