@@ -28,6 +28,10 @@ _lock = threading.Lock()
 _SCHEMA_VERSION = 1
 _last_load_ok = True
 
+_cached_data: dict | None = None
+_cached_mtime_ns: int | None = None
+_cached_path = None
+
 
 def last_load_ok() -> bool:
     if demo_mode.is_demo_mode():
@@ -90,23 +94,45 @@ def _migrate_legacy_files() -> dict | None:
 
 
 def _load_unlocked() -> dict:
-    global _last_load_ok
-    if not config.DEVICES_PATH.exists():
+    global _last_load_ok, _cached_data, _cached_mtime_ns, _cached_path
+    path = config.DEVICES_PATH
+    try:
+        mtime_ns = path.stat().st_mtime_ns
+    except OSError:
+        mtime_ns = None
+    if (
+        mtime_ns is not None
+        and _cached_data is not None
+        and _cached_path == path
+        and _cached_mtime_ns == mtime_ns
+    ):
+        return copy.deepcopy(_cached_data)
+    if mtime_ns is None:
         config.DATA_DIR.mkdir(parents=True, exist_ok=True)
         _last_load_ok = True
+        _cached_data = None
         return _migrate_legacy_files() or _empty()
-    data, ok = read_yaml_dict(config.DEVICES_PATH)
+    data, ok = read_yaml_dict(path)
     _last_load_ok = ok
     if not ok:
+        _cached_data = None
         return _empty()
     data.setdefault("devices", {})
     data.setdefault("schema_version", _SCHEMA_VERSION)
+    _cached_data, _cached_mtime_ns, _cached_path = copy.deepcopy(data), mtime_ns, path
     return data
 
 
 def _save_unlocked(data: dict):
+    global _cached_data, _cached_mtime_ns, _cached_path
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     write_yaml_dict(config.DEVICES_PATH, data)
+    try:
+        _cached_mtime_ns = config.DEVICES_PATH.stat().st_mtime_ns
+    except OSError:
+        _cached_data = None
+        return
+    _cached_data, _cached_path = copy.deepcopy(data), config.DEVICES_PATH
 
 
 def load() -> dict:

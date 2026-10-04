@@ -404,8 +404,10 @@ async def test_poll_device_skips_forwarding_a_reading_google_already_reported(mo
         for event in ticks_done:
             if not event.is_set():
                 event.set()
-                break
-        return [same_fix]
+                return [same_fix]
+        # A 3rd+ call blocks instead of returning immediately, so the task
+        # can't spin past 2 real ticks before it's cancelled below.
+        await asyncio.Event().wait()
 
     monkeypatch.setattr(scheduler, "locate_device", locate_returning_the_same_fix_twice)
 
