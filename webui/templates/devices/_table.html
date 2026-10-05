@@ -34,6 +34,9 @@
         {% elif status and status.state == "stale" %}
           <span class="status-chip status-chip--stale" title="Newest ping is {{ format_duration(status.age_s) }} old - stale past {{ format_duration(status.threshold_s) }}"><i></i>Stale</span>
         {% endif %}
+        {% if not device.alerts_status.enabled %}
+          <span class="status-chip status-chip--off" title="No alert will be sent, no matter how old this device's newest ping gets"><i></i>Tracking off</span>
+        {% endif %}
         <button type="button" class="card-drag-handle" aria-label="Drag to reorder" title="Drag to reorder"></button>
       </div>
     </div>
@@ -65,20 +68,21 @@
       <summary>Alerts
         <span class="staleness-status">
           {% set astat = device.alerts_status %}
-          {% if not astat.enabled %}
-            <span class="log-skipped" title="No alert will be sent, no matter how old this device's newest ping gets">Tracking off</span>
-          {% elif astat.muted %}
-            <span class="log-skipped" title="Tracking is on, but the stale alert and the recovery notice are both silenced">Muted</span>
-          {% elif not astat.has_data %}
-            <span class="log-skipped" title="This device has never reported a location, so there's nothing to compare against its threshold yet">No data yet</span>
-          {% elif astat.is_stale %}
-            <span class="log-error" title="Newest ping is {{ format_duration(astat.age_s) }} old - past the {{ format_duration(astat.threshold_s) }} alert threshold">Stale</span>
+          {% if astat.enabled %}
+            {% if astat.muted %}
+              <span class="log-skipped" title="Tracking is on, but the stale alert and the recovery notice are both silenced">Muted</span>
+            {% elif not astat.has_data %}
+              <span class="log-skipped" title="This device has never reported a location, so there's nothing to compare against its threshold yet">No data yet</span>
+            {% elif astat.is_stale %}
+              <span class="log-error" title="Newest ping is {{ format_duration(astat.age_s) }} old - past the {{ format_duration(astat.threshold_s) }} alert threshold">Stale</span>
+            {% endif %}
           {% endif %}
-          {# Nothing rendered for "enabled, unmuted, has data, not stale" -
-             the card header's own Fresh/Stale chip already says so; saying
-             "Fresh" again right next to "Alerts" read as the same thing
-             twice. The wrapper span stays either way, so static/app.js's
-             live update always has somewhere to write a later "Stale". #}
+          {# "Tracking off" now lives on the card header chip instead (see
+             above) - and nothing renders here for "enabled, unmuted, has
+             data, not stale" either, since that's just the header's
+             Fresh/Stale chip restated. The wrapper span stays regardless,
+             so static/app.js's live update always has somewhere to write a
+             later "Stale". #}
         </span>
       </summary>
 
