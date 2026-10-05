@@ -86,7 +86,9 @@
           Build {{ build_sha_short }}
         {% endif %}
         {% if build_branch %} ({{ build_branch }}){% endif %}
+        {% if build_date %}<br>built {{ build_date }}{% endif %}
         <br>up {{ uptime_str }}
+        <br><span id="footer-now" data-ts="{{ now_ts }}" data-offset-min="{{ now_utc_offset_min }}">{{ now_str }}</span>
         {% if demo_mode %}<br><span class="demo-badge">Demo</span>{% endif %}
         <br><a href="https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi" target="_blank" rel="noopener">Source</a>
       </div>
@@ -155,6 +157,32 @@
         else if (e.target === backdrop) closeDrawer();
         else if (e.target.closest(".drawer nav a")) closeDrawer();
       });
+
+      // Footer clock - the SERVER's time, not the viewer's own browser
+      // clock/timezone, so a misconfigured TZ env var actually shows up
+      // here instead of being masked by whatever the viewer's machine
+      // happens to be set to. data-ts is a UTC epoch (seconds) as of the
+      // render that served this page, data-offset-min the server's own
+      // local UTC offset (see templating.py's now_ts/now_utc_offset_min) -
+      // ticking shifts that fixed moment forward by real elapsed time (so
+      // it doesn't just freeze at page-load) and reads it back with the
+      // UTC getters against the shifted value, never the browser's own
+      // getHours()/etc, which would silently substitute its own timezone.
+      var nowEl = document.getElementById("footer-now");
+      if (nowEl) {
+        var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        function pad(n) { return n < 10 ? "0" + n : String(n); }
+        var serverMsAtLoad = parseFloat(nowEl.dataset.ts) * 1000;
+        var offsetMs = (parseInt(nowEl.dataset.offsetMin, 10) || 0) * 60000;
+        var clientMsAtLoad = Date.now();
+        function tickClock() {
+          var elapsed = Date.now() - clientMsAtLoad;
+          var d = new Date(serverMsAtLoad + elapsed + offsetMs);
+          nowEl.textContent = pad(d.getUTCHours()) + ":" + pad(d.getUTCMinutes()) + ":" + pad(d.getUTCSeconds())
+            + " · " + pad(d.getUTCDate()) + " " + months[d.getUTCMonth()] + " " + d.getUTCFullYear();
+        }
+        setInterval(tickClock, 1000);
+      }
     })();
   </script>
 </body>
