@@ -2,10 +2,29 @@ document.addEventListener("DOMContentLoaded", () => {
   const mapEl = document.getElementById("map");
   if (!mapEl) return;
 
+  // Restored before L.map() below reads the container's size, so the very
+  // first render is already the right height instead of starting at the
+  // CSS default and jumping once the ResizeObserver below corrects it.
+  const MAP_HEIGHT_KEY = "gfmt-map-height";
+  let savedMapHeight = null;
+  try { savedMapHeight = localStorage.getItem(MAP_HEIGHT_KEY); } catch (e) {}
+  if (savedMapHeight) mapEl.style.height = savedMapHeight;
+
   const map = L.map("map").setView([0, 0], 2);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap contributors",
   }).addTo(map);
+
+  // #map is CSS `resize: vertical` (see app.css) - dragging its corner grip
+  // resizes the element directly, which Leaflet never sees on its own, so
+  // every size change needs an explicit invalidateSize() or the tile grid
+  // stays clipped/misaligned to the old height. Also persists the new
+  // height per viewer, the same per-browser localStorage convention as
+  // card_reorder.js's saved card order.
+  new ResizeObserver(() => {
+    map.invalidateSize();
+    try { localStorage.setItem(MAP_HEIGHT_KEY, `${mapEl.offsetHeight}px`); } catch (e) {}
+  }).observe(mapEl);
 
   // Shown until the devices table's (often slow) load actually reaches the
   // map - see seedMapMarkers and _not_signed_in.html's script.

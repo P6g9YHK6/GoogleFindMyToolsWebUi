@@ -885,6 +885,9 @@ td button {
 
 #map {
   height: 400px;
+  min-height: 200px;
+  max-height: 80vh;
+  resize: vertical;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
