@@ -4,6 +4,7 @@ dispatch, failure escalation) is covered separately in
 tests/test_forwarders_policy.py."""
 
 import asyncio
+import time
 from datetime import datetime
 
 from webui import scheduler
@@ -185,6 +186,73 @@ async def test_poll_device_records_last_sent_position_on_success(monkeypatch, tm
     assert state["last_forward_status"] == "ok"
     assert state["last_sent_lat"] == 12.5
     assert state["last_sent_lon"] == 34.5
+
+
+async def test_poll_device_checks_staleness_inline_on_every_tick(monkeypatch, tmp_path):
+    """A device with endpoints is no longer covered by webui/staleness.py's
+    own separate sweep (see test_staleness.py's
+    test_sweep_skips_a_device_with_endpoints_even_if_stale) - it has to get
+    the same check from right here instead, on every poll tick, even one
+    where locate comes back empty (an old fix already on file is what makes
+    it stale in the first place)."""
+    from webui import config, device_location_store
+    from webui.forwarders import config_store, latest_values_store
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+    monkeypatch.setattr(config, "FORWARD_LOG_PATH", tmp_path / "forward_log.json")
+    monkeypatch.setattr(scheduler, "is_logged_in", lambda: True)
+
+    canonic_id = "staleness-inline-device"
+    config_store.set_device_config(canonic_id, {
+        "display_name": "Stale Tag",
+        "endpoints": [_traccar_endpoint(cron="* * * * *")],
+    })
+
+    old_fix_time = int(time.time()) - 7200
+    device_location_store.set_last_location(
+        canonic_id, [{"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": old_fix_time}],
+        fetched_at=old_fix_time,
+    )
+    latest_values_store.set_device_staleness(canonic_id, {
+        "enabled": True, "threshold_s": 3600, "repeat_s": None, "muted": False,
+        "message_template": "No update from {{device_name}} in over {{threshold}}",
+        "alert_active": False, "last_alert_sent_at": None,
+    })
+
+    tick_done = asyncio.Event()
+
+    async def locate_returns_nothing(canonic_id, name):
+        tick_done.set()
+        return []
+
+    monkeypatch.setattr(scheduler, "locate_device", locate_returns_nothing)
+
+    orig_sleep = asyncio.sleep
+    sleep_calls = {"n": 0}
+
+    async def fast_sleep(_secs):
+        # Same "only the first sleep is fast" guard as
+        # test_poll_device_records_last_sent_position_on_success above - stops
+        # a second tick from sneaking in and racing the assertions below.
+        sleep_calls["n"] += 1
+        await orig_sleep(0 if sleep_calls["n"] <= 1 else _secs)
+
+    monkeypatch.setattr(asyncio, "sleep", fast_sleep)
+
+    task = asyncio.create_task(scheduler._poll_device(canonic_id))
+    try:
+        await asyncio.wait_for(tick_done.wait(), timeout=5)
+    finally:
+        monkeypatch.setattr(asyncio, "sleep", orig_sleep)
+    await orig_sleep(0.3)  # let the rest of this tick (forwarding, then the staleness check) finish
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    assert latest_values_store.get_device_staleness(canonic_id)["alert_active"] is True
 
 
 async def test_poll_device_forwards_a_semantic_reading_with_mapped_coordinates(monkeypatch, tmp_path):

@@ -13,9 +13,13 @@ module's own comment for why.
 
 Distinct concern from webui/scheduler.py (owns *when* a device gets polled)
 and webui/forwarders/policy.py (owns *whether a fix is worth forwarding*) -
-this owns neither; it just asks "is the newest fix we have too old", on its
-own independent sweep, since a device with no forwarding endpoints
-configured is never polled by scheduler.py's per-device cron loop at all.
+this owns neither; it just asks "is the newest fix we have too old". A
+device with forwarding endpoints configured gets check_device() called
+inline on every one of scheduler.py's own poll ticks instead of a separate
+pass re-deriving the same thing from the fix that tick just persisted;
+sweep_once()'s own timer only still covers devices with no endpoints at
+all, since those are never polled by scheduler.py's per-device cron loop in
+the first place.
 """
 
 import asyncio
@@ -23,7 +27,7 @@ import logging
 import re
 import time
 
-from webui import device_location_store, settings_store
+from webui import config, device_location_store
 from webui.forwarders import config_store, latest_values_store
 
 logger = logging.getLogger("webui.staleness")
@@ -189,58 +193,79 @@ def _alert_context(canonic_id: str, name: str, alias: str, status: dict) -> dict
     }
 
 
+def check_device(canonic_id: str, device_cfg: dict, now: float | None = None):
+    """Fires (or repeats/clears) a staleness alert for one device, if it's
+    enabled/unmuted and its threshold has been crossed - the shared body
+    both sweep_once (devices with no forwarding endpoints) and
+    webui/scheduler.py's _poll_device (every other device, called inline on
+    each of its own poll ticks instead of waiting for a separate pass) call
+    per device."""
+    now = time.time() if now is None else now
+    staleness_cfg = latest_values_store.get_device_staleness(canonic_id)
+    if not staleness_cfg or not staleness_cfg.get("enabled") or staleness_cfg.get("muted"):
+        return
+
+    name = device_cfg.get("google_name") or device_cfg.get("display_name") or canonic_id
+    alias = device_cfg.get("display_name") or name
+    status = compute_status(canonic_id, staleness_cfg, now=now)
+    alert_active = bool(staleness_cfg.get("alert_active"))
+    changed = False
+
+    if status["is_stale"]:
+        repeat_s = staleness_cfg.get("repeat_s")
+        last_sent = staleness_cfg.get("last_alert_sent_at")
+        should_fire = not alert_active or (repeat_s and (last_sent is None or now - last_sent >= repeat_s))
+        if should_fire:
+            template = staleness_cfg.get("message_template") or DEFAULT_MESSAGE_TEMPLATE
+            message = render_template(template, _alert_context(canonic_id, name, alias, status))
+            logger.warning("%s", message)
+            staleness_cfg["alert_active"] = True
+            staleness_cfg["last_alert_sent_at"] = now
+            changed = True
+    elif alert_active:
+        logger.warning(
+            "%s is reporting again (was stale for over %s)", alias, format_duration(status["threshold_s"])
+        )
+        staleness_cfg["alert_active"] = False
+        staleness_cfg["last_alert_sent_at"] = None
+        changed = True
+
+    if changed:
+        latest_values_store.set_device_staleness(canonic_id, staleness_cfg)
+
+
 def sweep_once(now: float | None = None):
-    """One pass over every device: fires (or repeats/clears) a staleness
-    alert for each enabled, unmuted device whose threshold has been crossed.
-    Called on a timer by sweep_loop below, and directly by tests."""
+    """One pass over every device with no forwarding endpoints configured -
+    the only ones left uncovered by scheduler.py's per-device poll loop
+    calling check_device() inline on its own ticks (a device with endpoints
+    skips this loop entirely, see the continue below, to avoid re-deriving
+    the same check against the same data twice). Called on a timer by
+    sweep_loop below, and directly by tests.
+
+    Accepted gap: a device whose endpoints are all configured with an
+    invalid cron expression never actually runs scheduler.py's poll loop
+    either (it returns before ever ticking), so it's skipped here too and
+    goes uncovered - rare enough in practice (the schedule editor's presets/
+    builder make a genuinely invalid cron hard to produce by accident) that
+    it isn't worth a cross-module check just to close it."""
     now = time.time() if now is None else now
     devices = config_store.all_devices()
     for canonic_id, device_cfg in devices.items():
-        staleness_cfg = latest_values_store.get_device_staleness(canonic_id)
-        if not staleness_cfg or not staleness_cfg.get("enabled") or staleness_cfg.get("muted"):
+        if device_cfg.get("endpoints"):
             continue
-
-        name = device_cfg.get("google_name") or device_cfg.get("display_name") or canonic_id
-        alias = device_cfg.get("display_name") or name
-        status = compute_status(canonic_id, staleness_cfg, now=now)
-        alert_active = bool(staleness_cfg.get("alert_active"))
-        changed = False
-
-        if status["is_stale"]:
-            repeat_s = staleness_cfg.get("repeat_s")
-            last_sent = staleness_cfg.get("last_alert_sent_at")
-            should_fire = not alert_active or (repeat_s and (last_sent is None or now - last_sent >= repeat_s))
-            if should_fire:
-                template = staleness_cfg.get("message_template") or DEFAULT_MESSAGE_TEMPLATE
-                message = render_template(template, _alert_context(canonic_id, name, alias, status))
-                logger.warning("%s", message)
-                staleness_cfg["alert_active"] = True
-                staleness_cfg["last_alert_sent_at"] = now
-                changed = True
-        elif alert_active:
-            logger.warning(
-                "%s is reporting again (was stale for over %s)", alias, format_duration(status["threshold_s"])
-            )
-            staleness_cfg["alert_active"] = False
-            staleness_cfg["last_alert_sent_at"] = None
-            changed = True
-
-        if changed:
-            latest_values_store.set_device_staleness(canonic_id, staleness_cfg)
+        check_device(canonic_id, device_cfg, now=now)
 
 
 async def sweep_loop():
-    """Runs sweep_once() on a timer, independent of any device's own cron
-    schedule - a device with zero forwarding endpoints is never polled by
-    webui/scheduler.py's per-device loops at all, so staleness can't
-    piggyback on those. Interval is re-read from settings_store on every
-    iteration (see webui/settings_store.py's staleness_sweep_interval_s),
-    same live-without-restart convention as the query throttle. Started from
-    webui/main.py's lifespan alongside scheduler.start_all()."""
+    """Runs sweep_once() on a timer - see its own docstring for which
+    devices that actually still covers. Interval is a plain env var (see
+    config.STALENESS_SWEEP_INTERVAL_S), not a live-editable Config-page
+    setting: it governs how often a handful of never-polled devices get
+    re-checked, not anything worth reconfiguring without a restart. Started
+    from webui/main.py's lifespan alongside scheduler.start_all()."""
     while True:
         try:
             sweep_once()
         except Exception:
             logger.exception("Staleness sweep failed")
-        interval = settings_store.load().get("staleness_sweep_interval_s") or 3600
-        await asyncio.sleep(max(60, interval))
+        await asyncio.sleep(max(60, config.STALENESS_SWEEP_INTERVAL_S))

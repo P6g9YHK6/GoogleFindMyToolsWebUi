@@ -27,6 +27,11 @@ DEFAULT_POLL_INTERVAL_S = int(os.environ.get("DEFAULT_POLL_INTERVAL_S", "300"))
 DEVICE_LIST_CACHE_TTL_S = float(os.environ.get("DEVICE_LIST_CACHE_TTL_S", str(24 * 3600)))
 LOCATE_CONCURRENCY = int(os.environ.get("LOCATE_CONCURRENCY", "5"))
 LOCATE_TIMEOUT_S = int(os.environ.get("LOCATE_TIMEOUT_S", "60"))
+# How often webui/staleness.py's sweep re-checks a device with no forwarding
+# endpoints configured - the only ones it still covers, since a device with
+# endpoints gets the same check inline on every one of scheduler.py's own
+# poll ticks instead (see staleness.py's module docstring).
+STALENESS_SWEEP_INTERVAL_S = int(os.environ.get("STALENESS_SWEEP_INTERVAL_S", "3600"))
 
 # Account-wide throttle for every blocking call to Google's backend - see
 # webui/deps.py's run_blocking. At most QUERY_THROTTLE_MAX requests per

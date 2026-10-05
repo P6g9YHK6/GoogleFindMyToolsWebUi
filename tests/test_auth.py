@@ -279,7 +279,6 @@ def test_save_app_settings_yaml_persists_and_switches_back_to_form(client, tmp_p
             "query_min_spread_s: 2.0\n"
             "apprise_urls: json://yaml.example/hook\n"
             "apprise_notify_level: CRITICAL\n"
-            "staleness_sweep_interval_s: 900\n"
             "semantic_location_map: {}\n"
         )
         resp = client.post("/auth/settings/yaml", data={"yaml_text": yaml_text})
@@ -309,7 +308,6 @@ def test_save_app_settings_yaml_persists_a_semantic_location_map(client, tmp_pat
             "query_min_spread_s: 2.0\n"
             "apprise_urls: \"\"\n"
             "apprise_notify_level: WARNING\n"
-            "staleness_sweep_interval_s: 900\n"
             "semantic_location_map:\n"
             "  Nest Mini - Living Room:\n"
             "    latitude: 45.0\n"
@@ -342,7 +340,6 @@ def test_save_app_settings_yaml_persists_a_partial_match_semantic_location_map(c
             "query_min_spread_s: 2.0\n"
             "apprise_urls: \"\"\n"
             "apprise_notify_level: WARNING\n"
-            "staleness_sweep_interval_s: 900\n"
             "semantic_location_map:\n"
             "  Living Room:\n"
             "    latitude: 45.0\n"
@@ -375,7 +372,6 @@ def test_save_app_settings_yaml_persists_a_semantic_location_map_altitude(client
             "query_min_spread_s: 2.0\n"
             "apprise_urls: \"\"\n"
             "apprise_notify_level: WARNING\n"
-            "staleness_sweep_interval_s: 900\n"
             "semantic_location_map:\n"
             "  Nest Mini - Living Room:\n"
             "    latitude: 45.0\n"
@@ -408,7 +404,6 @@ def test_save_app_settings_yaml_rejects_an_invalid_match_mode(client, tmp_path, 
         "query_min_spread_s: 2.0\n"
         "apprise_urls: \"\"\n"
         "apprise_notify_level: WARNING\n"
-        "staleness_sweep_interval_s: 900\n"
         "semantic_location_map:\n"
         "  Nest Mini - Living Room:\n"
         "    latitude: 45.0\n"
@@ -434,7 +429,6 @@ def test_save_app_settings_yaml_rejects_a_malformed_semantic_location_map(client
         "query_min_spread_s: 2.0\n"
         "apprise_urls: \"\"\n"
         "apprise_notify_level: WARNING\n"
-        "staleness_sweep_interval_s: 900\n"
         "semantic_location_map:\n"
         "  Nest Mini - Living Room: not-a-mapping\n"
     )

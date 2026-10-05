@@ -121,7 +121,6 @@ def _non_secret_settings_summary() -> dict:
         "query_throttle_max": settings.get("query_throttle_max"),
         "query_throttle_window_s": settings.get("query_throttle_window_s"),
         "query_min_spread_s": settings.get("query_min_spread_s"),
-        "staleness_sweep_interval_s": settings.get("staleness_sweep_interval_s"),
     }
 
 

@@ -87,7 +87,6 @@ _APP_SETTINGS_SCHEMA: dict[str, Callable[[Any], Any]] = {
     "query_min_spread_s": float,
     "apprise_urls": str,
     "apprise_notify_level": str,
-    "staleness_sweep_interval_s": int,
     "semantic_location_map": _to_semantic_map,
 }
 
@@ -141,7 +140,6 @@ async def save_app_settings(
     query_min_spread_s: float = Form(...),
     apprise_urls: str = Form(""),
     apprise_notify_level: str = Form("WARNING"),
-    staleness_sweep_interval_s: int = Form(3600),
 ):
     # The semantic-name/lat/lon rows are a dynamic, variable-length table
     # (see auth/_app_settings.html) - posted as parallel
@@ -157,7 +155,6 @@ async def save_app_settings(
         "query_min_spread_s": query_min_spread_s,
         "apprise_urls": apprise_urls,
         "apprise_notify_level": apprise_notify_level,
-        "staleness_sweep_interval_s": staleness_sweep_interval_s,
         "semantic_location_map": _parse_semantic_map_form(form),
     }
     _apply_app_settings(app_settings)

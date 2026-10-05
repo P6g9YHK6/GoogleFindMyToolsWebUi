@@ -156,6 +156,27 @@ def test_sweep_skips_devices_not_opted_in(tmp_path, monkeypatch, caplog):
     assert caplog.records == []
 
 
+def test_sweep_skips_a_device_with_endpoints_even_if_stale(tmp_path, monkeypatch, caplog):
+    """A device with forwarding endpoints gets check_device() called inline
+    on every one of webui/scheduler.py's own poll ticks instead - sweep_once
+    must leave it alone, or the two would duplicate each other's work (and
+    duplicate alerts)."""
+    _use_tmp_stores(tmp_path, monkeypatch)
+    now = 1_700_000_000
+    config_store.set_device_config(CANONIC_ID, {
+        "display_name": "", "google_name": "My Tag",
+        "endpoints": [{"method": "GET", "url": "http://x/", "cron": "*/5 * * * *"}],
+    })
+    cfg = {**staleness.default_staleness(), "enabled": True, "threshold_s": 3600}
+    latest_values_store.set_device_staleness(CANONIC_ID, cfg)
+    _set_fix(now, age_s=7200)
+
+    with caplog.at_level(logging.WARNING, logger="webui.staleness"):
+        staleness.sweep_once(now=now)
+    assert caplog.records == []
+    assert latest_values_store.get_device_staleness(CANONIC_ID)["alert_active"] is False
+
+
 # --- latest_values_store plumbing -----------------------------------------
 
 def test_device_staleness_round_trips(tmp_path, monkeypatch):

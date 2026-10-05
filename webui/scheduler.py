@@ -5,7 +5,7 @@ from datetime import datetime
 
 from croniter import croniter
 
-from webui import demo_mode, device_location_store, settings_store, ws
+from webui import demo_mode, device_location_store, settings_store, staleness, ws
 from webui.auth_state import is_logged_in
 from webui.deps import locate_device
 from webui.forwarders import config_store, latest_values_store, log_store, semantic_map
@@ -191,6 +191,12 @@ async def _poll_device(canonic_id: str):
                 "locations": display_locations,
                 "source": "poll",
             })
+
+        # A device with endpoints is covered here, on every poll tick,
+        # instead of by webui/staleness.py's own separate sweep - see that
+        # module's docstring. No-ops immediately for a device with alerting
+        # not enabled/muted, so this is cheap to call unconditionally.
+        staleness.check_device(canonic_id, device_cfg)
 
 
 async def forward_now(canonic_id: str, index: int) -> dict | None:

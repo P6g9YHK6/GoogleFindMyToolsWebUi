@@ -21,12 +21,6 @@ def _defaults() -> dict:
         "query_min_spread_s": config.QUERY_MIN_SPREAD_S,
         "apprise_urls": os.environ.get("APPRISE_URLS", ""),
         "apprise_notify_level": os.environ.get("APPRISE_NOTIFY_LEVEL", "WARNING"),
-        # How often webui/staleness.py's independent background sweep
-        # re-checks every device's last-known fix age - separate from any
-        # device's own cron schedule (see that module's own docstring for
-        # why it has to be). Applies live, same as the throttle settings
-        # above - no restart needed.
-        "staleness_sweep_interval_s": 3600,
         # Fixed coordinates for named SEMANTIC locations (e.g. "Nest Mini -
         # Living Room") - Google never reports lat/lon for these, so without
         # an entry here they're skipped by every forwarder (see
