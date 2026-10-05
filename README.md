@@ -16,6 +16,7 @@ It's built on top of [GoogleFindMyTools](https://github.com/leonboe1/GoogleFindM
 ## Features
 
 - **Devices page** - every tracker and phone on your account, in one list. Manual "Locate" and "Play sound" buttons, plus whatever the last scheduled poll found. Shows last-seen time for phones and tags alike.
+- **Stale-device alerts** - each device's card has its own Alerts section: turn on tracking, set how long is too long before it's worth a warning, and optionally repeat the alert while it stays stale. Fires through the same [Apprise](https://github.com/caronc/apprise) targets as the logging below, so a dead battery or a BLE tag that's drifted out of range shows up wherever you already watch for forwarding failures, not just as a quiet chip on the page.
 - **Scheduled forwarding, not a one-off export** - each device polls on its own cron schedule and forwards to as many destinations as you want, each with its own schedule and its own alias. Every destination is really the same generic HTTP request builder (method, URL - query string and all - headers, body, all with `{{latitude}}`-style placeholders) - Traccar, and Nextcloud PhoneTrack's OsmAnd, GpsLogger, Locus Map, uLogger, OwnTracks, and Overland-compatible log endpoints are just one-time presets that pre-fill it when you're setting up a new endpoint, so you can add a custom endpoint (a different self-hosted service, a webhook, whatever takes HTTP) without waiting on this project to add it by name.
 - **Skip pointless updates** - two independent, opt-in gates per destination: skip sending if the device hasn't moved far enough, and skip re-sending the same stale cached fix Google keeps returning. Both are local math (haversine distance), no external API calls, no extra cost.
 - **Logging** - every forwarding attempt and every warning/error anywhere in the app (a failed locate, an expired token, a forwarding failure) lands in a searchable in-app log, with errors also pushed out live through [Apprise](https://github.com/caronc/apprise) to whatever you already use (ntfy, Discord, Telegram, Pushover, email, 100+ others) - configured from the Config page, no restart needed.
@@ -50,6 +51,12 @@ Copy `.env.example` to `.env` and fill in what you need, or pass these directly 
 | `HTTP_USER` / `HTTP_PASSWORD` | unset | Set both to require this username/password pair (HTTP Basic Auth) for the whole web UI, including the embedded login view. |
 | `SECRETS_ENCRYPTION_KEY` | unset | Any string. When set, every credential in `auth.yaml` (OAuth tokens, FCM credentials, vault keys, ...) is encrypted at rest (AES-256-GCM). Unset keeps the old plain-text behavior and logs a one-time startup warning saying so. Losing/changing this makes existing encrypted values unreadable; you'd need to sign in again to regenerate them. |
 | `TZ` | UTC | Timezone for timestamps shown in the UI and logs. |
+
+<details>
+<summary><strong>Advanced / rarely changed</strong></summary>
+
+| Variable | Default | What it does |
+|---|---|---|
 | `GFMT_DATA_DIR` | `/data` (in the container) | Where all persisted state lives: device/forwarding config, credentials, location history, logs - one flat directory, just mount a volume onto it. |
 | `GFMT_FIRMWARE_DIR` | `webui/firmware/` locally, `/firmware` in the Docker image | Where the on-demand ESP-IDF toolchain and firmware-build sandboxes live - deliberately separate from `GFMT_DATA_DIR` so they never bloat your backed-up volume. Not mounted by default in Docker, so they're ephemeral unless you opt in to a `-v .../firmware:/firmware` volume (see docker-compose.yml, the Unraid template). On first startup after upgrading, anything left from before the split (the old `esp-idf/`, `esp-idf-tools/`, `firmware_builds/` under `GFMT_DATA_DIR`) is auto-moved here, so your `/data` volume sheds the multi-GB install without a fresh download. |
 | `GFMT_FIRMWARE_KEEP_BUILDS` | 5 | Max recent firmware build sandboxes to keep on disk (the rest are pruned). Combined with `GFMT_FIRMWARE_BUILD_TTL_S` for a two-pronged sweep. |
@@ -58,11 +65,14 @@ Copy `.env.example` to `.env` and fill in what you need, or pass these directly 
 | `DEFAULT_POLL_INTERVAL_S` | 300 | Fallback poll interval for a newly added device before you set its own cron schedule. |
 | `LOCATE_CONCURRENCY` | 5 | Max number of devices being actively located at once. |
 | `LOCATE_TIMEOUT_S` | 60 | How long to wait for a single locate before giving up. |
+| `STALENESS_SWEEP_INTERVAL_S` | 3600 | How often a device with *no* forwarding endpoints configured gets re-checked against its own Alerts threshold (set from its card on the Devices page). A device with endpoints is checked inline on every one of its own polls instead, so this only matters for the rest. |
 | `QUERY_THROTTLE_MAX` / `QUERY_THROTTLE_WINDOW_S` / `QUERY_MIN_SPREAD_S` | 20 / 60 / 1 | Account-wide rate limit against Google's backend. Also editable live from the Config page - no restart needed. |
 | `HTTPS_ENABLED` | unset | Set to `1` to serve HTTPS instead of HTTP on the same port, using a self-signed certificate generated automatically on first start and reused after that (not regenerated every restart). See [Security](#security). |
 | `GFMT_TLS_CERT_PATH` / `GFMT_TLS_KEY_PATH` | unset | Bring your own cert/key instead of the self-signed one - both must point at existing files, or startup fails rather than silently falling back to self-signed. |
 | `GFMT_TLS_SAN` | unset | Comma-separated extra hostnames/IPs to add to the generated self-signed cert (it always covers `localhost`/`127.0.0.1`/`::1`) - set this to your LAN hostname or static IP if you reach the box by either. |
 | `GFMT_TLS_VALIDITY_DAYS` | 825 | How long a generated self-signed cert is valid for. Defaults to Apple's ATS cap (Safari/iOS/macOS reject longer-lived certs even after you manually trust them) - raise it if you don't care about Safari. |
+
+</details>
 
 The Config page also has fields for the query throttle and Apprise notification settings, applied immediately without a restart.
 
