@@ -887,7 +887,6 @@ td button {
   height: 400px;
   min-height: 200px;
   max-height: 80vh;
-  resize: vertical;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
@@ -905,6 +904,48 @@ td button {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   pointer-events: none;
+}
+
+/* A plain CSS `resize` handle on #map fights Leaflet for the same
+   mousedown/drag it uses to pan the map - dragging the native grip just
+   panned the tiles instead of resizing the container. This is our own
+   small handle instead (see static/app.js), sitting above every Leaflet
+   pane so it gets the pointer events first; Leaflet's attribution control
+   moves to bottom-left to stay clear of it. */
+.map-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 1.1rem;
+  height: 1.1rem;
+  cursor: ns-resize;
+  touch-action: none;
+  z-index: 1000;
+}
+
+.map-resize-handle::before {
+  content: "";
+  position: absolute;
+  right: 0.3rem;
+  bottom: 0.3rem;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  opacity: 0.6;
+}
+
+.map-resize-handle:hover::before {
+  opacity: 1;
+}
+
+body.map-resizing {
+  cursor: ns-resize !important;
+}
+
+body.map-resizing * {
+  cursor: ns-resize !important;
+  user-select: none;
 }
 
 /* Leaflet's default .leaflet-div-icon styling adds a white box + border

@@ -14,17 +14,48 @@ document.addEventListener("DOMContentLoaded", () => {
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap contributors",
   }).addTo(map);
+  // Clears the bottom-right corner for .map-resize-handle below - Leaflet
+  // puts its attribution control there by default.
+  map.attributionControl.setPosition("bottomleft");
 
-  // #map is CSS `resize: vertical` (see app.css) - dragging its corner grip
-  // resizes the element directly, which Leaflet never sees on its own, so
-  // every size change needs an explicit invalidateSize() or the tile grid
-  // stays clipped/misaligned to the old height. Also persists the new
-  // height per viewer, the same per-browser localStorage convention as
-  // card_reorder.js's saved card order.
+  // Every size change (dragged via .map-resize-handle below) needs an
+  // explicit invalidateSize() or the tile grid stays clipped/misaligned to
+  // the old height. Also persists the new height per viewer, the same
+  // per-browser localStorage convention as card_reorder.js's saved card
+  // order.
   new ResizeObserver(() => {
     map.invalidateSize();
     try { localStorage.setItem(MAP_HEIGHT_KEY, `${mapEl.offsetHeight}px`); } catch (e) {}
   }).observe(mapEl);
+
+  // A plain CSS `resize` handle on #map itself fights Leaflet for the same
+  // mousedown/drag it uses to pan the map - dragging the native grip just
+  // panned the tiles instead of resizing the container. This is our own
+  // handle instead, sitting above every Leaflet pane (see app.css's
+  // z-index) so it gets the pointer events first. Document-level
+  // move/up listeners rather than the handle's own setPointerCapture -
+  // see card_reorder.js's own note on why.
+  const mapResizeHandle = document.querySelector(".map-resize-handle");
+  const MAP_MIN_HEIGHT = 200;
+  mapResizeHandle?.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = mapEl.offsetHeight;
+    document.body.classList.add("map-resizing");
+
+    const onMove = (ev) => {
+      const maxHeight = window.innerHeight * 0.8;
+      const nextHeight = Math.min(maxHeight, Math.max(MAP_MIN_HEIGHT, startHeight + (ev.clientY - startY)));
+      mapEl.style.height = `${nextHeight}px`;
+    };
+    const stop = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", stop);
+      document.body.classList.remove("map-resizing");
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", stop);
+  });
 
   // Shown until the devices table's (often slow) load actually reaches the
   // map - see seedMapMarkers and _not_signed_in.html's script.

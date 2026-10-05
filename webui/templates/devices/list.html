@@ -70,5 +70,9 @@
      thing on this page, and the map used to just sit empty at the [0,0]
      world view with nothing telling you it was still waiting on that. #}
   <div id="map-loading">Loading map…</div>
+  {# A plain CSS resize handle on #map itself fights Leaflet's own drag
+     handling (see app.css's own comment) - this sits above every Leaflet
+     pane instead, wired up in static/app.js. #}
+  <div class="map-resize-handle" title="Drag to resize the map"></div>
 </div>
 {% endblock %}
