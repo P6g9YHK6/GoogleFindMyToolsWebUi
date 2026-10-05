@@ -12,6 +12,12 @@
     <svg class="icon icon-sm"><use href="#i-refresh"/></svg> Refresh device list
   </button>
   <span id="devices-refresh-spinner" class="action-spinner htmx-indicator" aria-hidden="true"></span>
+  {# Only the newest ping stays on the map for a device with more than one -
+     see static/app.js's renderDeviceMarkers - so this is also the one
+     button that puts every device's full ping history on the map at once. #}
+  <button type="button" class="btn-secondary" id="toggle-all-pings">
+    <svg class="icon icon-sm"><use href="#i-chevron"/></svg> <span>Expand all pings</span>
+  </button>
 </div>
 <div id="device-table" hx-get="/devices/table" hx-trigger="load" hx-swap="innerHTML">
   Loading...
@@ -29,6 +35,17 @@
     const custom = wrap?.querySelector(".duration-custom");
     if (!custom) return;
     custom.hidden = event.target.value !== "";
+  });
+
+  // Opens (or closes) every "+N more pings" disclosure at once - each one
+  // firing its own native "toggle" event as it does is what actually syncs
+  // the map (see static/app.js's document-level "toggle" listener), so this
+  // button only needs to flip the <details> elements themselves.
+  document.getElementById("toggle-all-pings").addEventListener("click", (event) => {
+    const overflows = Array.from(document.querySelectorAll("#device-table .ping-overflow"));
+    const expand = overflows.some((d) => !d.open);
+    overflows.forEach((d) => { d.open = expand; });
+    event.currentTarget.querySelector("span").textContent = expand ? "Collapse all pings" : "Expand all pings";
   });
 </script>
 

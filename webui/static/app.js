@@ -160,6 +160,28 @@ document.addEventListener("DOMContentLoaded", () => {
     return latlngs;
   }
 
+  // canonicId -> {name, locations, source} - every device's full location
+  // list, independent of how many pins are actually on the map right now.
+  // Kept around so a "+N more pings" disclosure (see devices/_locate_cell.html)
+  // being opened/closed later can re-derive the visible subset without a
+  // round-trip - the data's already here from the initial load/live update.
+  const deviceLocationsByCanonicId = new Map();
+
+  // canonicId of every device whose "+N more pings" disclosure is currently
+  // open - only those get pins beyond their single newest one. Starts empty
+  // since every .ping-overflow <details> renders closed by default.
+  const expandedOverflows = new Set();
+
+  // Plots just the currently-visible subset for one device: its newest
+  // location always, the rest only while its ping-overflow disclosure is
+  // open - see the "toggle" listener below for what flips that set.
+  function renderDeviceMarkers(canonicId) {
+    const data = deviceLocationsByCanonicId.get(canonicId);
+    if (!data) return [];
+    const visible = expandedOverflows.has(canonicId) ? data.locations : (data.locations || []).slice(0, 1);
+    return upsertDeviceMarkers(canonicId, data.name, visible, data.source);
+  }
+
   // Seeds the map with whatever locations are already on file, so pins show
   // up on page load instead of waiting for a live locate - called by
   // devices/_table.html's inline script once its htmx "load" response
@@ -167,7 +189,10 @@ document.addEventListener("DOMContentLoaded", () => {
   window.seedMapMarkers = function (devices) {
     const allLatLngs = [];
     for (const device of devices || []) {
-      allLatLngs.push(...upsertDeviceMarkers(device.canonic_id, device.name, device.locations, null));
+      deviceLocationsByCanonicId.set(device.canonic_id, {
+        name: device.name, locations: device.locations, source: null,
+      });
+      allLatLngs.push(...renderDeviceMarkers(device.canonic_id));
     }
     if (allLatLngs.length === 1) {
       map.setView(allLatLngs[0], 13);
@@ -177,6 +202,22 @@ document.addEventListener("DOMContentLoaded", () => {
     window.hideMapLoading();
   };
 
+  // A device's ping-overflow disclosure opening/closing (a direct click, or
+  // the "Expand/Collapse all" button in devices/list.html setting .open in
+  // bulk - both dispatch this same native event) re-derives that device's
+  // visible pins immediately, without waiting for the next live update.
+  // "toggle" doesn't bubble, but a capturing listener on document still sees
+  // it on the way down to its target.
+  document.addEventListener("toggle", (e) => {
+    const details = e.target;
+    if (!details.matches || !details.matches(".ping-overflow")) return;
+    const canonicId = details.closest("[data-canonic-id]")?.dataset.canonicId;
+    if (!canonicId) return;
+    if (details.open) expandedOverflows.add(canonicId);
+    else expandedOverflows.delete(canonicId);
+    renderDeviceMarkers(canonicId);
+  }, true);
+
   function connect() {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(`${proto}//${location.host}/ws/locations`);
@@ -185,7 +226,10 @@ document.addEventListener("DOMContentLoaded", () => {
       const msg = JSON.parse(event.data);
       if (msg.type !== "locate_result") return;
 
-      const latlngs = upsertDeviceMarkers(msg.canonic_id, msg.name, msg.locations, msg.source);
+      deviceLocationsByCanonicId.set(msg.canonic_id, {
+        name: msg.name, locations: msg.locations, source: msg.source,
+      });
+      const latlngs = renderDeviceMarkers(msg.canonic_id);
       if (latlngs.length) map.panTo(latlngs[latlngs.length - 1]);
 
       const times = (msg.locations || [])
