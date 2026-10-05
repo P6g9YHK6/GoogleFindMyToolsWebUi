@@ -80,6 +80,26 @@ def default_staleness() -> dict:
     }
 
 
+def parse_duration_field(form, base_name: str, allow_off: bool) -> int | None:
+    """(preset select + "Custom" hours input) -> seconds, or None. allow_off
+    additionally recognizes REPEAT_OFF ("alert once, don't repeat"), never
+    offered on the threshold field itself."""
+    preset = (form.get(f"{base_name}_preset", "") or "").strip()
+    if allow_off and preset == REPEAT_OFF:
+        return None
+    if preset:
+        try:
+            return int(preset)
+        except ValueError:
+            pass
+    custom_hours = (form.get(f"{base_name}_custom_hours", "") or "").strip()
+    try:
+        hours = float(custom_hours)
+    except ValueError:
+        return None
+    return int(hours * 3600) if hours > 0 else None
+
+
 def format_duration(seconds: float | int | None) -> str:
     """"2 days"/"18 hours"/"45 minutes" - coarse on purpose, this is for a
     notification message, a table cell, or a tooltip, not a precise log

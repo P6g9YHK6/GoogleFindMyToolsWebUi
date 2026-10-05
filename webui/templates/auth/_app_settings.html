@@ -46,12 +46,12 @@
   </fieldset>
 
   <fieldset>
-    <legend>Staleness page</legend>
+    <legend>Alert sweep</legend>
     <label>How often to re-check every device's last-known fix age
       <input type="number" name="staleness_sweep_interval_s" min="60" step="60"
              value="{{ app_settings.staleness_sweep_interval_s }}">
     </label>
-    <p class="field-hint">Seconds. Independent of any device's own poll schedule - see the <a href="/staleness">Staleness page</a>, where each device's own alert threshold is set.</p>
+    <p class="field-hint">Seconds. Independent of any device's own poll schedule - see each device's Alerts section on the <a href="/">Devices page</a>, where its own alert threshold is set.</p>
   </fieldset>
 
   <fieldset id="semantic-map-fieldset">

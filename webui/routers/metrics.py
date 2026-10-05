@@ -93,9 +93,9 @@ def _render() -> str:
         lines.append(f'gfmt_system_log_entries{{level="{level}"}} {count}')
     lines.append("")
 
-    # Same compute_status() every device row on the Staleness page itself
-    # calls (see webui/routers/staleness.py) - can't disagree with what
-    # that page shows. Only devices with tracking actually turned on are
+    # Same compute_status() every device card's Alerts disclosure itself
+    # calls (see webui/routers/devices.py) - can't disagree with what the
+    # Devices page shows. Only devices with tracking actually turned on are
     # counted at all; "stale" here always implies "enabled".
     stale_count = 0
     for canonic_id in config_store.all_devices():

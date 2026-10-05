@@ -380,3 +380,53 @@ def test_devices_table_omits_sharing_line_when_only_the_owner_has_access(client,
     assert "Shared with" not in resp.text
 
 
+def test_devices_table_shows_alerts_disclosure(client):
+    resp = client.get("/devices/table")
+    assert resp.status_code == 200
+    assert "Alerts" in resp.text
+    assert "Tracking off" in resp.text  # not opted in yet
+
+
+def test_save_device_alerts_via_form(client, tmp_path, monkeypatch):
+    from webui import config
+    from webui.forwarders import latest_values_store
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+    monkeypatch.setattr(config, "FORWARDING_CONFIG_LEGACY_JSON_PATH", tmp_path / "forwarding_config.json")
+
+    resp = client.post(
+        f"/devices/{FAKE_CANONIC_ID}/staleness",
+        data={
+            "enabled": "1",
+            "threshold_preset": "86400",
+            "repeat_preset": "off",
+            "message_template": "Custom: {{device_name}}",
+            "muted": "0",
+        },
+    )
+    assert resp.status_code == 200
+
+    saved = latest_values_store.get_device_staleness(FAKE_CANONIC_ID)
+    assert saved["enabled"] is True
+    assert saved["threshold_s"] == 86400
+    assert saved["repeat_s"] is None
+    assert saved["message_template"] == "Custom: {{device_name}}"
+
+
+def test_save_device_alerts_accepts_a_custom_hours_value(client, tmp_path, monkeypatch):
+    from webui import config
+    from webui.forwarders import latest_values_store
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+    monkeypatch.setattr(config, "FORWARDING_CONFIG_LEGACY_JSON_PATH", tmp_path / "forwarding_config.json")
+
+    resp = client.post(
+        f"/devices/{FAKE_CANONIC_ID}/staleness",
+        data={"enabled": "1", "threshold_preset": "", "threshold_custom_hours": "5", "repeat_preset": "off"},
+    )
+    assert resp.status_code == 200
+    assert latest_values_store.get_device_staleness(FAKE_CANONIC_ID)["threshold_s"] == 5 * 3600
+
+

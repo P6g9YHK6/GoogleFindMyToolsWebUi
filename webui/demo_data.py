@@ -242,8 +242,7 @@ def demo_device_details() -> list[dict]:
     """Same shape as ProtoDecoders.decoder.get_device_details()'s return
     value. Used in place of a real Nova device-list fetch by every page that
     normally makes one (webui/routers/devices.py, webui/forwarders/
-    settings_service.py, webui/routers/staleness.py) when demo mode
-    applies."""
+    settings_service.py) when demo mode applies."""
     now = int(time.time())
     return [
         {

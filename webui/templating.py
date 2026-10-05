@@ -59,7 +59,6 @@ _NAV_PAGES = {
     "/": "devices",
     "/firmware": "firmware",
     "/settings": "settings",
-    "/staleness": "staleness",
     "/logs": "logs",
     "/auth": "auth",
 }

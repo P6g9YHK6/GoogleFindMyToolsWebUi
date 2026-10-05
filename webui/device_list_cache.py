@@ -1,11 +1,10 @@
 """Cache around the Nova device-list call every one of the Devices/
-Staleness/Forwarding Settings pages hits on load - the slowest thing any of
-them do. Held for a full day by default (see config.DEVICE_LIST_CACHE_TTL_S)
-so a normal page load never re-queries Google at all; each of those pages'
-own "Refresh" button (webui/routers/devices.py's /devices/refresh,
-webui/routers/staleness.py's /staleness/refresh) calls invalidate() below to
-bypass it on demand. One shared, keyless, process-wide slot: this app only
-ever talks to one signed-in Google account at a time.
+Forwarding Settings pages hits on load - the slowest thing any of them do.
+Held for a full day by default (see config.DEVICE_LIST_CACHE_TTL_S) so a
+normal page load never re-queries Google at all; each of those pages' own
+"Refresh" button (webui/routers/devices.py's /devices/refresh) calls
+invalidate() below to bypass it on demand. One shared, keyless, process-wide
+slot: this app only ever talks to one signed-in Google account at a time.
 
 Deliberately not in NovaApi/ListDevices/nbe_list_devices.py itself - that
 module's list_devices() is also the CLI entry point and must never see stale

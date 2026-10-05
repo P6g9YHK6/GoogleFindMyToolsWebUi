@@ -19,12 +19,11 @@ GFMT_BROWSER_DOWNLOAD_TIMEOUT_S = int(os.environ.get("GFMT_BROWSER_DOWNLOAD_TIME
 GFMT_BROWSER_APT_IDLE_TIMEOUT_S = int(os.environ.get("GFMT_BROWSER_APT_IDLE_TIMEOUT_S", "300"))
 DEFAULT_POLL_INTERVAL_S = int(os.environ.get("DEFAULT_POLL_INTERVAL_S", "300"))
 # How long a device-list fetch is cached before re-fetching -
-# webui/device_list_cache.py. The Devices/Staleness/Forwarding Settings
-# pages all read through this one shared slot, so a plain page load never
-# re-queries Google - 24h, same as the account's own device list rarely
-# changing shape minute to minute - and each of those pages' own "Refresh"
-# button (webui/routers/devices.py's /devices/refresh,
-# webui/routers/staleness.py's /staleness/refresh) bypasses it on demand.
+# webui/device_list_cache.py. The Devices/Forwarding Settings pages both
+# read through this one shared slot, so a plain page load never re-queries
+# Google - 24h, same as the account's own device list rarely changing shape
+# minute to minute - and each of those pages' own "Refresh" button
+# (webui/routers/devices.py's /devices/refresh) bypasses it on demand.
 DEVICE_LIST_CACHE_TTL_S = float(os.environ.get("DEVICE_LIST_CACHE_TTL_S", str(24 * 3600)))
 LOCATE_CONCURRENCY = int(os.environ.get("LOCATE_CONCURRENCY", "5"))
 LOCATE_TIMEOUT_S = int(os.environ.get("LOCATE_TIMEOUT_S", "60"))

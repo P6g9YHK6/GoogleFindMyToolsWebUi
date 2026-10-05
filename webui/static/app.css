@@ -1051,7 +1051,7 @@ li[data-loc-key].loc-glow {
 }
 
 /* A quiet, derived freshness indicator (webui/staleness.py's
-   display_status) - separate from the Staleness page's opt-in alerting,
+   display_status) - separate from the Alerts disclosure's opt-in alerting,
    this just reflects how old the newest ping is. */
 .status-chip {
   display: inline-flex;
@@ -1997,22 +1997,14 @@ table[data-table-id="logs"] tbody tr td:first-child {
   white-space: nowrap;
 }
 
-/* Staleness page - a device with tracking off is still listed (so turning
-   it on is one click away), just visually dimmed rather than hidden. */
-.staleness-row--disabled {
-  opacity: 0.6;
-}
-
 .staleness-ago {
   font-size: 0.8rem;
   color: var(--text-muted);
 }
 
-/* Otherwise stretches edge-to-edge across whatever's left of the row once
-   the other three columns take their share - a multi-field form reads
-   better as a contained panel than a form spread the full width of a wide
-   table cell. */
-.staleness-configure {
+/* The Alerts disclosure's save form - a multi-field form reads better as a
+   contained panel than one spread the full width of the card. */
+.device-alerts {
   max-width: 32rem;
 }
 

@@ -17,6 +17,21 @@
   Loading...
 </div>
 
+<script>
+  // Auto-opens/closes the "Custom" hours field next to each threshold/repeat
+  // preset select inside a card's Alerts disclosure - purely cosmetic (the
+  // server-side parse in webui/routers/devices.py already accepts either
+  // field regardless of this). Delegated off #device-table so it keeps
+  // working across every htmx swap of that fragment with no re-init step.
+  document.getElementById("device-table").addEventListener("change", (event) => {
+    if (!event.target.classList.contains("duration-preset")) return;
+    const wrap = event.target.closest(".duration-field");
+    const custom = wrap?.querySelector(".duration-custom");
+    if (!custom) return;
+    custom.hidden = event.target.value !== "";
+  });
+</script>
+
 {# One shared popup for every device photo in the table above (see its own
    .device-thumb-btn) - lives here, outside the #device-table htmx fragment,
    so reloading the table can never leave a second copy behind. static/
