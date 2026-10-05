@@ -173,10 +173,10 @@ def display_status(canonic_id: str, staleness_cfg: dict | None, now: float | Non
     now = time.time() if now is None else now
     last_fix_time = _newest_fix_time(canonic_id)
     if last_fix_time is None:
-        return {"state": "unknown", "age_s": None}
+        return {"state": "unknown", "age_s": None, "threshold_s": None}
     threshold_s = (staleness_cfg or {}).get("threshold_s") or DEFAULT_DISPLAY_THRESHOLD_S
     age_s = now - last_fix_time
-    return {"state": "stale" if age_s > threshold_s else "fresh", "age_s": age_s}
+    return {"state": "stale" if age_s > threshold_s else "fresh", "age_s": age_s, "threshold_s": threshold_s}
 
 
 def _alert_context(canonic_id: str, name: str, alias: str, status: dict) -> dict:

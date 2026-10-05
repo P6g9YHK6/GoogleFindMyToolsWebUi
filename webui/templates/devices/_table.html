@@ -24,15 +24,15 @@
        data-threshold-s="{{ device.alerts_status.threshold_s or '' }}">
     <div class="device-card-head">
       <div>
-        <b class="device-card-name">{{ device.name }}</b>
-        {% if device.alias %}<span class="device-card-alias">{{ device.alias }}</span>{% endif %}
+        <b class="device-card-name" title="{{ device.name }} is Google's own name for this device">{{ device.name }}</b>
+        {% if device.alias %}<span class="device-card-alias" title="Local nickname, set from the Edit link below">{{ device.alias }}</span>{% endif %}
       </div>
       <div class="device-card-head-right">
         {% set status = device.staleness_display %}
         {% if status and status.state == "fresh" %}
-          <span class="status-chip status-chip--fresh"><i></i>Fresh</span>
+          <span class="status-chip status-chip--fresh" title="Newest ping is {{ format_duration(status.age_s) }} old - counted fresh under {{ format_duration(status.threshold_s) }}"><i></i>Fresh</span>
         {% elif status and status.state == "stale" %}
-          <span class="status-chip status-chip--stale"><i></i>Stale</span>
+          <span class="status-chip status-chip--stale" title="Newest ping is {{ format_duration(status.age_s) }} old - stale past {{ format_duration(status.threshold_s) }}"><i></i>Stale</span>
         {% endif %}
         <button type="button" class="card-drag-handle" aria-label="Drag to reorder" title="Drag to reorder"></button>
       </div>
@@ -40,15 +40,15 @@
 
     <div class="device-summary">
       {% if device.image_url %}
-        <button type="button" class="device-thumb-btn" data-image-url="{{ device.image_url }}" data-image-label="{{ device.name }}" aria-label="View full-size photo of {{ device.name }}">
+        <button type="button" class="device-thumb-btn" data-image-url="{{ device.image_url }}" data-image-label="{{ device.name }}" aria-label="View full-size photo of {{ device.name }}" title="View full-size photo">
           <img class="device-thumb" src="{{ device.image_url }}" alt="" loading="lazy">
         </button>
       {% endif %}
-      {% if device.type_label %}<span>{{ device.type_label }}</span>{% endif %}
+      {% if device.type_label %}<span title="Device type reported by Google">{{ device.type_label }}</span>{% endif %}
     </div>
     {% if device.manufacturer or device.model or device.carrier or device.codename or device.registered_at_str or device.imei or device.shared_with %}
       <details class="device-details">
-        <summary>Details</summary>
+        <summary title="Hardware info reported by Google for this device">Details</summary>
         <ul>
           {% if device.manufacturer %}<li>Manufacturer: {{ device.manufacturer }}</li>{% endif %}
           {% if device.model %}<li>Model: {{ device.model }}</li>{% endif %}
@@ -61,27 +61,27 @@
       </details>
     {% endif %}
 
-    <details class="device-alerts">
+    <details class="device-alerts" title="Per-device alerting - separate from the Fresh/Stale chip above, and off by default until configured below">
       <summary>Alerts
         <span class="staleness-status">
           {% set astat = device.alerts_status %}
           {% if not astat.enabled %}
-            <span class="log-skipped">Tracking off</span>
+            <span class="log-skipped" title="No alert will be sent, no matter how old this device's newest ping gets">Tracking off</span>
           {% elif astat.muted %}
-            <span class="log-skipped">Muted</span>
+            <span class="log-skipped" title="Tracking is on, but the stale alert and the recovery notice are both silenced">Muted</span>
           {% elif not astat.has_data %}
-            <span class="log-skipped">No data yet</span>
+            <span class="log-skipped" title="This device has never reported a location, so there's nothing to compare against its threshold yet">No data yet</span>
           {% elif astat.is_stale %}
-            <span class="log-error">Stale</span>
+            <span class="log-error" title="Newest ping is {{ format_duration(astat.age_s) }} old - past the {{ format_duration(astat.threshold_s) }} alert threshold">Stale</span>
           {% else %}
-            <span class="log-ok">Fresh</span>
+            <span class="log-ok" title="Newest ping is {{ format_duration(astat.age_s) }} old - under the {{ format_duration(astat.threshold_s) }} alert threshold">Fresh</span>
           {% endif %}
         </span>
       </summary>
 
       <div class="device-card-meta">
-        <span>{{ device.alerts_last_fix_str or "-" }}</span>
-        {% if astat.last_fix_time %}<span class="staleness-ago" data-last-fix-ts="{{ astat.last_fix_time }}"></span>{% endif %}
+        <span title="The same fix timestamp the alert threshold is measured against">{{ device.alerts_last_fix_str or "-" }}</span>
+        {% if astat.last_fix_time %}<span class="staleness-ago" data-last-fix-ts="{{ astat.last_fix_time }}" title="{{ ping_time(astat.last_fix_time) }}"></span>{% endif %}
       </div>
 
       <form hx-post="/devices/{{ device.canonic_id }}/staleness" hx-target="#device-table" hx-swap="innerHTML">
@@ -121,14 +121,14 @@
     </div>
 
     <div class="device-card-meta">
-      <span>Seen by Find Hub: {{ device.last_seen_str or "-" }}</span>
-      <span>Endpoints: {{ device.endpoint_count }}</span>
-      <span id="polled-at-{{ device.canonic_id }}">Polled: {{ device.last_fetched_at_str or "-" }}</span>
+      <span title="The last time Google's Find Hub itself saw this device, independent of anything GFMT has polled">Seen by Find Hub: {{ device.last_seen_str or "-" }}</span>
+      <span title="How many forwarding endpoints are configured for this device - see Edit below">Endpoints: {{ device.endpoint_count }}</span>
+      <span id="polled-at-{{ device.canonic_id }}" title="The last time GFMT itself fetched this device's location, manually or on its poll schedule">Polled: {{ device.last_fetched_at_str or "-" }}</span>
     </div>
     <div class="device-card-meta">
       <span>
-        {{ device.next_poll_str or "Not scheduled" }}
-        · <a href="/settings#device-{{ device.canonic_id }}"><svg class="icon icon-sm"><use href="#i-edit"/></svg>Edit</a>
+        <span title="When the poll scheduler will next check this device, based on its endpoints' cron schedules">{{ device.next_poll_str or "Not scheduled" }}</span>
+        · <a href="/settings#device-{{ device.canonic_id }}" title="Edit this device's forwarding endpoints and poll schedule"><svg class="icon icon-sm"><use href="#i-edit"/></svg>Edit</a>
         {% if device.next_poll_ts %}
           <span class="next-poll-countdown" data-next-poll-ts="{{ device.next_poll_ts }}"></span>
         {% endif %}
@@ -136,15 +136,15 @@
     </div>
 
     <div class="device-card-actions">
-      <button type="button" class="btn-icon" title="Locate"
+      <button type="button" class="btn-icon" title="Locate this device now"
               hx-post="/devices/{{ device.canonic_id }}/locate?name={{ device.name | urlencode }}"
               hx-target="#locate-result-{{ loop.index }}" hx-swap="innerHTML"
               hx-indicator="#action-spinner-{{ device.canonic_id }}"><svg class="icon"><use href="#i-crosshair"/></svg></button>
-      <button type="button" class="btn-icon" title="Play sound"
+      <button type="button" class="btn-icon" title="Play a sound on this device"
               hx-post="/devices/{{ device.canonic_id }}/sound/start"
               hx-target="#sound-status-{{ device.canonic_id }}" hx-swap="innerHTML"
               hx-indicator="#action-spinner-{{ device.canonic_id }}"><svg class="icon"><use href="#i-volume"/></svg></button>
-      <button type="button" class="btn-icon" title="Stop sound"
+      <button type="button" class="btn-icon" title="Stop the sound"
               hx-post="/devices/{{ device.canonic_id }}/sound/stop"
               hx-target="#sound-status-{{ device.canonic_id }}" hx-swap="innerHTML"
               hx-indicator="#action-spinner-{{ device.canonic_id }}"><svg class="icon"><use href="#i-mute"/></svg></button>

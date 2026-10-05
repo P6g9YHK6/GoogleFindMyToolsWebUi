@@ -5,7 +5,7 @@ from datetime import datetime
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
-from webui import config, demo_mode, scheduler
+from webui import config, demo_mode, scheduler, staleness
 from webui.colors import location_color
 
 BASE_DIR = pathlib.Path(__file__).parent
@@ -90,3 +90,8 @@ templates.env.globals["cron_preview"] = scheduler.cron_preview
 # color through by hand.
 templates.env.globals["location_color"] = location_color
 templates.env.globals["ping_time"] = ping_time
+# "2 days"/"18 hours"/... for tooltips built from a staleness/alert status's
+# age_s/threshold_s (see devices/_table.html) - same wording the alert
+# message itself uses, so a card's tooltip never disagrees with its own
+# notification text.
+templates.env.globals["format_duration"] = staleness.format_duration

@@ -10,11 +10,11 @@
   {% for loc in locations %}
     {% if loop.index0 == 1 and overflow_count > 0 %}
     </ul>
-    <details class="ping-overflow"><summary>+{{ overflow_count }} more ping{{ "s" if overflow_count != 1 else "" }}</summary>
+    <details class="ping-overflow"><summary title="Earlier readings from the same fetch - Google can bundle more than one in a single response">+{{ overflow_count }} more ping{{ "s" if overflow_count != 1 else "" }}</summary>
     <ul>
     {% endif %}
     {% if loc.is_semantic %}
-    <li title="{{ ping_time(loc.time) }}">
+    <li title="{{ ping_time(loc.time) }}{% if loc.latitude is not none %} - coordinates mapped from this semantic location{% endif %}">
         {{ loc.semantic_name }}{% if loc.latitude is not none %} (mapped){% endif %}
     </li>
     {% endif %}
@@ -30,7 +30,7 @@
         <span class="mono">{{ "%.5f"|format(loc.latitude) }}, {{ "%.5f"|format(loc.longitude) }}</span>
         {% if loc.map_links %}
         <details class="map-menu-wrap">
-          <summary><svg class="icon icon-sm"><use href="#i-pin"/></svg>Map<svg class="icon icon-sm"><use href="#i-chevron"/></svg></summary>
+          <summary title="Open this exact reading in a map provider"><svg class="icon icon-sm"><use href="#i-pin"/></svg>Map<svg class="icon icon-sm"><use href="#i-chevron"/></svg></summary>
           <div class="map-menu">
             {% for label, url in loc.map_links.items() %}<a href="{{ url }}" target="_blank" rel="noopener">{{ label }}</a>{% endfor %}
           </div>

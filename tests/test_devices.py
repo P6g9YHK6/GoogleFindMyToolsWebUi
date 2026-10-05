@@ -40,7 +40,8 @@ def test_devices_table_shows_alias_and_endpoint_count(client, tmp_path, monkeypa
     resp = client.get("/devices/table")
     assert resp.status_code == 200
     assert "Garage Tracker" in resp.text
-    assert '<span class="device-card-alias">Garage Tracker</span>' in resp.text
+    assert 'class="device-card-alias"' in resp.text
+    assert ">Garage Tracker</span>" in resp.text
     assert "Endpoints: 2" in resp.text
 
 
