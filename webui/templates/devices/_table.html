@@ -73,9 +73,12 @@
             <span class="log-skipped" title="This device has never reported a location, so there's nothing to compare against its threshold yet">No data yet</span>
           {% elif astat.is_stale %}
             <span class="log-error" title="Newest ping is {{ format_duration(astat.age_s) }} old - past the {{ format_duration(astat.threshold_s) }} alert threshold">Stale</span>
-          {% else %}
-            <span class="log-ok" title="Newest ping is {{ format_duration(astat.age_s) }} old - under the {{ format_duration(astat.threshold_s) }} alert threshold">Fresh</span>
           {% endif %}
+          {# Nothing rendered for "enabled, unmuted, has data, not stale" -
+             the card header's own Fresh/Stale chip already says so; saying
+             "Fresh" again right next to "Alerts" read as the same thing
+             twice. The wrapper span stays either way, so static/app.js's
+             live update always has somewhere to write a later "Stale". #}
         </span>
       </summary>
 
