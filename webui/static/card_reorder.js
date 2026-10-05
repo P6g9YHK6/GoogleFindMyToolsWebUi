@@ -41,7 +41,6 @@
       e.preventDefault();
       card.classList.add("card-dragging");
       document.body.classList.add("card-reordering");
-      handle.setPointerCapture(e.pointerId);
 
       const onMove = (ev) => {
         const target = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".device-card");
@@ -50,16 +49,19 @@
         const before = ev.clientX < rect.left + rect.width / 2;
         grid.insertBefore(card, before ? target : target.nextSibling);
       };
+      // document-level, not setPointerCapture on the handle - capture has
+      // proven unreliable (silently stops delivering pointermove partway
+      // through a drag), so this doesn't depend on it at all. Same fix as
+      // static/tables.js's column resize/reorder handles.
       const stop = () => {
-        handle.releasePointerCapture(e.pointerId);
-        handle.removeEventListener("pointermove", onMove);
-        handle.removeEventListener("pointerup", stop);
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", stop);
         card.classList.remove("card-dragging");
         document.body.classList.remove("card-reordering");
         saveOrder(key, cardIds(grid));
       };
-      handle.addEventListener("pointermove", onMove);
-      handle.addEventListener("pointerup", stop);
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", stop);
     });
   }
 

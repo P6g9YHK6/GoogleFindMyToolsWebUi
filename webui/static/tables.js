@@ -183,9 +183,8 @@
       th.style.width = `${Math.max(48, startWidth + (e.clientX - startX))}px`;
     };
     const stopResize = (e) => {
-      handle.releasePointerCapture(e.pointerId);
-      handle.removeEventListener("pointermove", onPointerMove);
-      handle.removeEventListener("pointerup", stopResize);
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", stopResize);
       document.body.classList.remove("col-resizing");
 
       const tableId = table.dataset.tableId;
@@ -198,18 +197,20 @@
     };
 
     // Pointer Events (not separate mouse/touch listeners) so mouse, touch
-    // and pen all drag the same way with one code path - setPointerCapture
-    // routes every subsequent move/up here regardless of where the pointer
-    // physically ends up, so no document-level listeners are needed either.
+    // and pen all drag the same way with one code path. Listeners go on
+    // document rather than the handle itself - setPointerCapture would
+    // normally route every subsequent move/up back to the handle regardless
+    // of where the pointer physically ends up, but it's proven unreliable
+    // (silently stops delivering events partway through a drag), so this
+    // doesn't depend on it at all.
     handle.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       e.stopPropagation(); // don't also trigger the header's sort click
       startX = e.clientX;
       startWidth = th.getBoundingClientRect().width;
       document.body.classList.add("col-resizing");
-      handle.setPointerCapture(e.pointerId);
-      handle.addEventListener("pointermove", onPointerMove);
-      handle.addEventListener("pointerup", stopResize);
+      document.addEventListener("pointermove", onPointerMove);
+      document.addEventListener("pointerup", stopResize);
     });
   }
 
@@ -231,9 +232,8 @@
       moveColumn(table, th, overTh, before);
     };
     const stopDrag = (e) => {
-      handle.releasePointerCapture(e.pointerId);
-      handle.removeEventListener("pointermove", onPointerMove);
-      handle.removeEventListener("pointerup", stopDrag);
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", stopDrag);
       th.classList.remove("col-dragging");
       document.body.classList.remove("col-reordering");
 
@@ -248,14 +248,16 @@
       applyHiddenColumns(table, tableId, prefs.hidden);
     };
 
+    // See addResizeHandle's comment above - document-level listeners rather
+    // than setPointerCapture, which stops delivering events partway through
+    // a drag.
     handle.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       e.stopPropagation(); // don't also trigger the header's sort click
       th.classList.add("col-dragging");
       document.body.classList.add("col-reordering");
-      handle.setPointerCapture(e.pointerId);
-      handle.addEventListener("pointermove", onPointerMove);
-      handle.addEventListener("pointerup", stopDrag);
+      document.addEventListener("pointermove", onPointerMove);
+      document.addEventListener("pointerup", stopDrag);
     });
   }
 
