@@ -80,9 +80,10 @@ def default_staleness() -> dict:
     }
 
 
-def _format_duration(seconds: float | int | None) -> str:
+def format_duration(seconds: float | int | None) -> str:
     """"2 days"/"18 hours"/"45 minutes" - coarse on purpose, this is for a
-    notification message and a table cell, not a precise log timestamp."""
+    notification message, a table cell, or a tooltip, not a precise log
+    timestamp."""
     if seconds is None:
         return "?"
     seconds = int(seconds)
@@ -163,8 +164,8 @@ def _alert_context(canonic_id: str, name: str, alias: str, status: dict) -> dict
         "device_name": name or "",
         "device_alias": alias or name or "",
         "tracker_id": canonic_id,
-        "threshold": _format_duration(status["threshold_s"]),
-        "age": _format_duration(status["age_s"]),
+        "threshold": format_duration(status["threshold_s"]),
+        "age": format_duration(status["age_s"]),
     }
 
 
@@ -197,7 +198,9 @@ def sweep_once(now: float | None = None):
                 staleness_cfg["last_alert_sent_at"] = now
                 changed = True
         elif alert_active:
-            logger.warning("%s is reporting again (was stale for over %s)", alias, _format_duration(status["threshold_s"]))
+            logger.warning(
+                "%s is reporting again (was stale for over %s)", alias, format_duration(status["threshold_s"])
+            )
             staleness_cfg["alert_active"] = False
             staleness_cfg["last_alert_sent_at"] = None
             changed = True
