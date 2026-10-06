@@ -387,9 +387,11 @@ function _updateStalenessRow(canonicId, newestFixTs) {
   const ageS = Date.now() / 1000 - newestFixTs;
   const statusCell = row.querySelector(".staleness-status");
   if (!statusCell) return;
-  statusCell.innerHTML = ageS > thresholdS
-    ? '<span class="log-error">Stale</span>'
-    : '<span class="log-ok">Fresh</span>';
+  // Fresh isn't spelled out here at all - see devices/_table.html's own
+  // comment on this same span - that's just the header's Fresh/Stale chip
+  // restated, so a live update that lands "fresh" clears this back to empty
+  // instead of writing a second "Fresh" next to it.
+  statusCell.innerHTML = ageS > thresholdS ? '<span class="log-error">Stale</span>' : "";
 }
 
 // Devices table photo -> full-size popup (see devices/_table.html's
