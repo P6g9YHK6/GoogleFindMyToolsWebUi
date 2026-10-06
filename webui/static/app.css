@@ -1131,6 +1131,11 @@ li[data-loc-key].loc-glow {
   background: color-mix(in srgb, var(--text-muted) var(--tint-medium), transparent);
 }
 
+.status-chip--neutral {
+  color: var(--text-muted);
+  background: var(--surface-alt);
+}
+
 /* Details / diagnostics */
 details {
   background: var(--surface);

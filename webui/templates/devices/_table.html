@@ -37,6 +37,7 @@
         {% if not device.alerts_status.enabled %}
           <span class="status-chip status-chip--off" title="No alert will be sent, no matter how old this device's newest ping gets"><i></i>Tracking off</span>
         {% endif %}
+        <span class="status-chip status-chip--neutral" title="How many forwarding endpoints are configured for this device - see Forwarding below">Fwd: {{ device.endpoint_count }}</span>
         <button type="button" class="card-drag-handle" aria-label="Drag to reorder" title="Drag to reorder"></button>
       </div>
     </div>
@@ -49,6 +50,15 @@
       {% endif %}
       {% if device.type_label %}<span title="Device type reported by Google">{{ device.type_label }}</span>{% endif %}
     </div>
+
+    <div id="locate-result-{{ loop.index }}">
+      {% set canonic_id = device.canonic_id %}
+      {% set name = device.name %}
+      {% set locations = device.last_locations %}
+      {% set fetched_at_str = device.last_fetched_at_str %}
+      {% include "devices/_locate_cell.html" %}
+    </div>
+
     {% if device.manufacturer or device.model or device.carrier or device.codename or device.registered_at_str or device.imei or device.shared_with %}
       <details class="device-details">
         <summary title="Hardware info reported by Google for this device">Details</summary>
@@ -119,27 +129,25 @@
       </form>
     </details>
 
-    <div id="locate-result-{{ loop.index }}">
-      {% set canonic_id = device.canonic_id %}
-      {% set name = device.name %}
-      {% set locations = device.last_locations %}
-      {% set fetched_at_str = device.last_fetched_at_str %}
-      {% include "devices/_locate_cell.html" %}
-    </div>
+    <details class="device-details">
+      <summary title="This device's forwarding endpoints and poll schedule - see Edit to change them">Forwarding</summary>
+      <div class="device-card-meta">
+        <span title="How many forwarding endpoints are configured for this device - see Edit below">Endpoints: {{ device.endpoint_count }}</span>
+      </div>
+      <div class="device-card-meta">
+        <span>
+          <span title="When the poll scheduler will next check this device, based on its endpoints' cron schedules">{{ device.next_poll_str or "Not scheduled" }}</span>
+          · <a href="/settings#device-{{ device.canonic_id }}" title="Edit this device's forwarding endpoints and poll schedule"><svg class="icon icon-sm"><use href="#i-edit"/></svg>Edit</a>
+          {% if device.next_poll_ts %}
+            <span class="next-poll-countdown" data-next-poll-ts="{{ device.next_poll_ts }}"></span>
+          {% endif %}
+        </span>
+      </div>
+    </details>
 
     <div class="device-card-meta">
       <span title="The last time Google's Find Hub itself saw this device, independent of anything GFMT has polled">Seen by Find Hub: {{ device.last_seen_str or "-" }}</span>
-      <span title="How many forwarding endpoints are configured for this device - see Edit below">Endpoints: {{ device.endpoint_count }}</span>
       <span id="polled-at-{{ device.canonic_id }}" title="The last time GFMT itself fetched this device's location, manually or on its poll schedule">Polled: {{ device.last_fetched_at_str or "-" }}</span>
-    </div>
-    <div class="device-card-meta">
-      <span>
-        <span title="When the poll scheduler will next check this device, based on its endpoints' cron schedules">{{ device.next_poll_str or "Not scheduled" }}</span>
-        · <a href="/settings#device-{{ device.canonic_id }}" title="Edit this device's forwarding endpoints and poll schedule"><svg class="icon icon-sm"><use href="#i-edit"/></svg>Edit</a>
-        {% if device.next_poll_ts %}
-          <span class="next-poll-countdown" data-next-poll-ts="{{ device.next_poll_ts }}"></span>
-        {% endif %}
-      </span>
     </div>
 
     <div class="device-card-actions">
