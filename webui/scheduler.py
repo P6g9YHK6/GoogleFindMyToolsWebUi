@@ -187,7 +187,14 @@ async def _poll_device(canonic_id: str):
             await ws.manager.broadcast({
                 "type": "locate_result",
                 "canonic_id": canonic_id,
-                "name": name,
+                # google_name/raw display_name here, not the locally-scoped
+                # name/alias above (name falls back to canonic_id, which
+                # would otherwise show up as its own redundant "alias") -
+                # matches webui/routers/devices.py's page-load "name"/"alias"
+                # so the map popup (static/app.js's popupLabel) reads the
+                # same regardless of which path reported the ping.
+                "name": google_name,
+                "alias": device_cfg.get("display_name"),
                 "locations": display_locations,
                 "source": "poll",
             })

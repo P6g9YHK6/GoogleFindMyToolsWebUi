@@ -153,7 +153,19 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function popupLabel(name, loc, source) {
+  // Mirrors webui/templating.py's ping_time formatting ("14:32 · 04 Oct
+  // 2026") so a pin's popup reads the same as that same location's hover
+  // title in the table - time first since that's usually the part worth a
+  // glance, month name instead of numeric to sidestep DD/MM vs MM/DD.
+  function formatPingTime(ts) {
+    if (!ts) return "";
+    const d = new Date(ts * 1000);
+    const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+    const date = d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+    return `${time} · ${date}`;
+  }
+
+  function popupLabel(name, alias, loc, source) {
     const bits = [];
     // A semantic reading with mapped coordinates (see
     // webui/forwarders/semantic_map.py) still carries is_own_report=true
@@ -163,7 +175,13 @@ document.addEventListener("DOMContentLoaded", () => {
     else if (loc.is_own_report) bits.push("own report");
     else if (loc.status) bits.push(loc.status.toLowerCase());
     if (source) bits.push(source);
-    return bits.length ? `${name} (${bits.join(", ")})` : name;
+
+    const title = alias ? `${name} <span class="popup-alias">(${alias})</span>` : name;
+    const lines = [title];
+    const time = formatPingTime(loc.time);
+    if (time) lines.push(time);
+    if (bits.length) lines.push(bits.join(", "));
+    return lines.join("<br>");
   }
 
   // Hovering a location's row in the table bounces its map pin; hovering a
@@ -198,7 +216,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // keyed by position in the locations array so each dot keeps its own
   // color and identity across updates. Returns the latlngs it plotted, for
   // callers that need to fit/pan the map to them.
-  function upsertDeviceMarkers(canonicId, name, locations, source) {
+  function upsertDeviceMarkers(canonicId, name, alias, locations, source) {
     const slots = markersByDevice.get(canonicId) || new Map();
     const seenIndexes = new Set();
     const latlngs = [];
@@ -213,7 +231,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const latlng = [loc.latitude, loc.longitude];
       const key = `${canonicId}:${index}`;
       const color = colorForDeviceLocation(canonicId, index);
-      const label = popupLabel(name, loc, source);
+      const label = popupLabel(name, alias, loc, source);
 
       if (slots.has(index)) {
         slots.get(index).setLatLng(latlng).setPopupContent(label);
@@ -240,7 +258,7 @@ document.addEventListener("DOMContentLoaded", () => {
     return latlngs;
   }
 
-  // canonicId -> {name, locations, source} - every device's full location
+  // canonicId -> {name, alias, locations, source} - every device's full location
   // list, independent of how many pins are actually on the map right now.
   // Kept around so a "+N more pings" disclosure (see devices/_locate_cell.html)
   // being opened/closed later can re-derive the visible subset without a
@@ -259,7 +277,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const data = deviceLocationsByCanonicId.get(canonicId);
     if (!data) return [];
     const visible = expandedOverflows.has(canonicId) ? data.locations : (data.locations || []).slice(0, 1);
-    return upsertDeviceMarkers(canonicId, data.name, visible, data.source);
+    return upsertDeviceMarkers(canonicId, data.name, data.alias, visible, data.source);
   }
 
   // Seeds the map with whatever locations are already on file, so pins show
@@ -270,7 +288,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const allLatLngs = [];
     for (const device of devices || []) {
       deviceLocationsByCanonicId.set(device.canonic_id, {
-        name: device.name, locations: device.locations, source: null,
+        name: device.name, alias: device.alias, locations: device.locations, source: null,
       });
       allLatLngs.push(...renderDeviceMarkers(device.canonic_id));
     }
@@ -307,7 +325,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (msg.type !== "locate_result") return;
 
       deviceLocationsByCanonicId.set(msg.canonic_id, {
-        name: msg.name, locations: msg.locations, source: msg.source,
+        name: msg.name, alias: msg.alias, locations: msg.locations, source: msg.source,
       });
       const latlngs = renderDeviceMarkers(msg.canonic_id);
       if (latlngs.length) map.panTo(latlngs[latlngs.length - 1]);

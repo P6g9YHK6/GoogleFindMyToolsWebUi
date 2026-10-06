@@ -4,6 +4,7 @@ import time
 from fastapi import APIRouter, Request
 
 from webui import device_location_store
+from webui.forwarders import config_store
 from webui.deps import locate_device
 from webui.templating import templates
 from webui.ws import manager
@@ -16,6 +17,8 @@ router = APIRouter()
 @router.post("/devices/{canonic_id}/locate")
 async def locate(request: Request, canonic_id: str, name: str = ""):
     display_name = name or canonic_id
+    device_cfg = config_store.get_device_config(canonic_id)
+    alias = device_cfg.get("display_name") if device_cfg else None
 
     try:
         locations = await locate_device(canonic_id, display_name)
@@ -63,6 +66,7 @@ async def locate(request: Request, canonic_id: str, name: str = ""):
         "type": "locate_result",
         "canonic_id": canonic_id,
         "name": display_name,
+        "alias": alias,
         "locations": display_locations,
         "source": "manual",
     })

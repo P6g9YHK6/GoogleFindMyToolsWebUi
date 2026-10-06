@@ -238,7 +238,12 @@ def _map_devices_json(devices: list[dict]) -> str:
     the full `devices` context (next-poll times, etc. would just be dead
     weight in the page's HTML)."""
     payload = [
-        {"canonic_id": d["canonic_id"], "name": d["name"], "locations": d["last_locations"] or []}
+        {
+            "canonic_id": d["canonic_id"],
+            "name": d["name"],
+            "alias": d["alias"],
+            "locations": d["last_locations"] or [],
+        }
         for d in devices
     ]
     return json.dumps(payload, default=str).replace("</", "<\\/")

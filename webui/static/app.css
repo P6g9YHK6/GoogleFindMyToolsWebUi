@@ -986,6 +986,13 @@ body.map-resizing * {
   animation: pin-bounce 0.6s ease-in-out infinite;
 }
 
+/* A pin's popup (static/app.js's popupLabel) - the local alias reads as a
+   secondary detail next to the device's real name, not equal billing. */
+.popup-alias {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
 @keyframes pin-bounce {
   0%, 100% { transform: translateY(0); }
   30% { transform: translateY(-10px); }
