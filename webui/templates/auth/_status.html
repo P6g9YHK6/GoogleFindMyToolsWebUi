@@ -3,7 +3,7 @@
 {% endif %}
 
 {% if status.logged_in %}
-  <p>Signed in{% if status.username %} as {{ status.username }}{% endif %}.</p>
+  <p>Signed in{% if status.username %} as <span class="blur-sensitive" tabindex="0" title="Hover or focus to reveal">{{ status.username }}</span>{% endif %}.</p>
   <p>
     End-to-end encryption (needed to locate devices):
     {% if status.shared_key_ready %}
@@ -21,11 +21,11 @@
   <p class="form-error">{{ clear_error }}</p>
 {% endif %}
 
-<details>
-  <summary>Diagnostic info</summary>
+<div class="diagnostic-info">
+  <p class="diagnostic-info-heading">Diagnostic info</p>
   <ul>
     {% for item in status.diagnostics %}
-      <li>{{ item.name }}: {% if item.present %}present{% else %}<em>missing</em>{% endif %}</li>
+      <li><span class="diagnostic-dot {{ 'diagnostic-dot--ok' if item.present else 'diagnostic-dot--missing' }}"></span>{{ item.name }}: {% if item.present %}present{% else %}<em>missing</em>{% endif %}</li>
     {% endfor %}
   </ul>
-</details>
+</div>

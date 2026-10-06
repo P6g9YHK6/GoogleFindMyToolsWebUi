@@ -1136,6 +1136,61 @@ li[data-loc-key].loc-glow {
   background: var(--surface-alt);
 }
 
+/* The signed-in account email - hidden from shoulder-surfing/screenshots by
+   default, legible only while the pointer is actually resting on it. */
+.blur-sensitive {
+  filter: blur(4px);
+  transition: filter 0.15s ease;
+}
+
+.blur-sensitive:hover,
+.blur-sensitive:focus {
+  filter: none;
+}
+
+/* Diagnostic info's per-key present/missing breakdown (webui/routers/auth.py's
+   _DIAGNOSTIC_KEYS) - a quick green/red glance instead of reading "present"
+   vs "missing" out of each line. */
+.diagnostic-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 0.45rem;
+}
+
+.diagnostic-dot--ok {
+  background: var(--success);
+}
+
+.diagnostic-dot--missing {
+  background: var(--danger);
+}
+
+/* Diagnostic info - same card look as the <details> elements below, but
+   always-visible rather than a disclosure, since this is small enough that
+   collapsing it just costs a click for no real benefit. */
+.diagnostic-info {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin-top: 1rem;
+  box-shadow: var(--shadow);
+}
+
+.diagnostic-info-heading {
+  margin: 0;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.diagnostic-info ul {
+  margin: 0.6rem 0 0;
+  padding-left: 1.2rem;
+  color: var(--text-muted);
+}
+
 /* Details / diagnostics */
 details {
   background: var(--surface);
