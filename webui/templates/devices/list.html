@@ -70,6 +70,9 @@
      thing on this page, and the map used to just sit empty at the [0,0]
      world view with nothing telling you it was still waiting on that. #}
   <div id="map-loading">Loading map…</div>
+  <button type="button" id="map-fullscreen-btn" class="btn-icon map-fullscreen-btn" title="Fullscreen" aria-label="Toggle fullscreen map">
+    <svg class="icon icon-sm"><use href="#i-expand"/></svg>
+  </button>
   {# A plain CSS resize handle on #map itself fights Leaflet's own drag
      handling (see app.css's own comment) - this sits above every Leaflet
      pane instead, wired up in static/app.js. #}

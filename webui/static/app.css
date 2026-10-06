@@ -948,6 +948,26 @@ body.map-resizing * {
   user-select: none;
 }
 
+.map-fullscreen-btn {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  z-index: 1000;
+}
+
+/* Leaflet's own container has no intrinsic size of its own in fullscreen -
+   it just inherits #map-wrap's height, so both need to stretch to the full
+   viewport together while the Fullscreen API has this element active. */
+#map-wrap:fullscreen {
+  height: 100vh;
+}
+
+#map-wrap:fullscreen #map {
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+}
+
 /* Leaflet's default .leaflet-div-icon styling adds a white box + border
    behind divIcon content - our pins are self-contained SVG, so drop it. */
 .device-pin {

@@ -18,15 +18,45 @@ document.addEventListener("DOMContentLoaded", () => {
   // puts its attribution control there by default.
   map.attributionControl.setPosition("bottomleft");
 
-  // Every size change (dragged via .map-resize-handle below) needs an
-  // explicit invalidateSize() or the tile grid stays clipped/misaligned to
-  // the old height. Also persists the new height per viewer, the same
-  // per-browser localStorage convention as card_reorder.js's saved card
-  // order.
+  // Every size change (dragged via .map-resize-handle below, or entering/
+  // leaving fullscreen below) needs an explicit invalidateSize() or the tile
+  // grid stays clipped/misaligned to the old height. Also persists the new
+  // height per viewer, the same per-browser localStorage convention as
+  // card_reorder.js's saved card order - except while fullscreen, where
+  // #map-wrap's CSS (not mapEl.style.height) is what's driving the size, and
+  // saving it would otherwise overwrite the real saved height with the
+  // viewport's own, applied back as an inline style the next time this page
+  // loads outside of fullscreen.
+  const mapWrapEl = document.getElementById("map-wrap");
   new ResizeObserver(() => {
     map.invalidateSize();
+    if (document.fullscreenElement === mapWrapEl) return;
     try { localStorage.setItem(MAP_HEIGHT_KEY, `${mapEl.offsetHeight}px`); } catch (e) {}
   }).observe(mapEl);
+
+  // Fullscreen toggles #map-wrap itself (not just #map) so the resize
+  // handle/button stay reachable rather than being left behind outside the
+  // fullscreen element. Falls back to the webkit-prefixed API for older
+  // Safari, which never shipped the unprefixed one.
+  const fullscreenBtn = document.getElementById("map-fullscreen-btn");
+  function isMapFullscreen() {
+    return document.fullscreenElement === mapWrapEl;
+  }
+  function updateFullscreenBtn() {
+    if (!fullscreenBtn) return;
+    const active = isMapFullscreen();
+    fullscreenBtn.querySelector(".icon use").setAttribute("href", active ? "#i-collapse" : "#i-expand");
+    fullscreenBtn.title = active ? "Exit fullscreen" : "Fullscreen";
+  }
+  fullscreenBtn?.addEventListener("click", () => {
+    if (isMapFullscreen()) {
+      (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+    } else {
+      (mapWrapEl.requestFullscreen || mapWrapEl.webkitRequestFullscreen)?.call(mapWrapEl);
+    }
+  });
+  document.addEventListener("fullscreenchange", updateFullscreenBtn);
+  document.addEventListener("webkitfullscreenchange", updateFullscreenBtn);
 
   // A plain CSS `resize` handle on #map itself fights Leaflet for the same
   // mousedown/drag it uses to pan the map - dragging the native grip just
