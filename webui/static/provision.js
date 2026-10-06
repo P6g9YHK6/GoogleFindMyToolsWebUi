@@ -129,6 +129,18 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   signinBtn.addEventListener("click", async () => {
+    // Only interrupt when the account is already fully set up (signed in
+    // *and* E2EE-confirmed) - see auth/_status.html's hidden flags. Signed
+    // in but not yet confirmed is the expected path for completing that
+    // second step, so it must fall straight through like today.
+    const flags = document.getElementById("auth-status-flags");
+    const alreadyConfirmed = flags?.dataset.loggedIn === "1" && flags?.dataset.sharedKeyReady === "1";
+    if (alreadyConfirmed && !window.confirm(
+      "Google sign-in and encryption confirmation are already complete. Sign in again anyway?"
+    )) {
+      return;
+    }
+
     logEl.innerHTML = "";
     lastPhase = null;
     ensureSocket();

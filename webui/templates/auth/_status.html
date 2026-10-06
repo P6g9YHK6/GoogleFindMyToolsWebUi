@@ -1,3 +1,12 @@
+{# Machine-readable mirror of the prose below, for provision.js's signin-btn
+   click handler - this fragment is what's always freshly re-rendered on
+   every status change (initial load, "Refresh status", "Clear credentials",
+   and provision.js's own post-sign-in fetch), so these flags can never go
+   stale the way attaching them to the button itself would. #}
+<span id="auth-status-flags" hidden
+      data-logged-in="{{ '1' if status.logged_in else '0' }}"
+      data-shared-key-ready="{{ '1' if status.shared_key_ready else '0' }}"></span>
+
 {% if status.cleanup_warning %}
   <p class="form-error"><svg class="icon icon-sm"><use href="#i-alert"/></svg> {{ status.cleanup_warning }}</p>
 {% endif %}
