@@ -37,7 +37,7 @@
         {% if not device.alerts_status.enabled %}
           <span class="status-chip status-chip--off" title="No alert will be sent, no matter how old this device's newest ping gets"><i></i>Tracking off</span>
         {% endif %}
-        <span class="status-chip status-chip--neutral" title="How many forwarding endpoints are configured for this device - see Forwarding below">Fwd: {{ device.endpoint_count }}</span>
+        <span class="status-chip status-chip--neutral" title="How many forwarding endpoints are configured for this device - see Forwarding below"><svg class="icon icon-sm"><use href="#i-send"/></svg>{{ device.endpoint_count }}</span>
         <button type="button" class="card-drag-handle" aria-label="Drag to reorder" title="Drag to reorder"></button>
       </div>
     </div>
