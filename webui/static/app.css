@@ -353,11 +353,6 @@ code {
   vertical-align: middle;
 }
 
-.icon-lg {
-  width: 26px;
-  height: 26px;
-}
-
 .icon-sm {
   width: 14px;
   height: 14px;
@@ -1731,18 +1726,6 @@ details ul {
 .device-details ul {
   margin: 0.3rem 0 0;
   padding-left: 1.1rem;
-}
-
-/* Devices page "Actions" column - Locate/Play sound/Stop sound (see
-   devices/_table.html). Wraps onto more than one line (buttons stacking
-   above each other) instead of forcing the column wider or spilling into a
-   horizontal scroll once the cell is narrower than all three buttons side
-   by side (a resized/reordered column, a narrow viewport, ...). */
-.actions-cell {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  align-items: center;
 }
 
 .btn-icon {

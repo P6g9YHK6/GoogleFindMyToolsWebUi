@@ -219,22 +219,23 @@ def test_devices_table_has_no_countdown_element_when_not_scheduled(client):
     assert "data-next-poll-ts" not in resp.text
 
 
-def test_next_poll_str_is_none_with_no_valid_cron(monkeypatch, tmp_path):
+def test_devices_table_has_no_countdown_element_with_only_an_invalid_cron(client, tmp_path, monkeypatch):
     from webui import config
     from webui.forwarders import config_store
-    from webui.routers.devices import _next_poll_str
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
     monkeypatch.setattr(config, "FORWARDING_CONFIG_LEGACY_JSON_PATH", tmp_path / "forwarding_config.json")
 
-    assert _next_poll_str(FAKE_CANONIC_ID) is None  # no config at all yet
-
     config_store.set_device_config(FAKE_CANONIC_ID, {
         "display_name": FAKE_DEVICE_NAME,
         "endpoints": [{"type": "traccar", "url": "http://x/", "cron": "not-a-cron"}],
     })
-    assert _next_poll_str(FAKE_CANONIC_ID) is None
+
+    resp = client.get("/devices/table")
+    assert resp.status_code == 200
+    assert "Not scheduled" in resp.text
+    assert "data-next-poll-ts" not in resp.text
 
 
 def test_devices_table_uses_persisted_location_time_when_proto_has_no_last_seen(client, tmp_path, monkeypatch):

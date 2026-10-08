@@ -121,11 +121,6 @@ def _next_poll(canonic_id: str) -> datetime | None:
     return min(valid_next_runs)
 
 
-def _next_poll_str(canonic_id: str) -> str | None:
-    next_poll = _next_poll(canonic_id)
-    return next_poll.strftime("%Y-%m-%d %H:%M:%S") if next_poll else None
-
-
 async def get_devices() -> list[dict]:
     # Two independent triggers (see webui/demo_mode.py): DEMO_MODE=1 itself,
     # or - the narrower case - a normal instance with no account signed in
