@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import ssl
 
 import Auth.firebase_messaging.fcmpushclient as fcmpushclient_module
@@ -8,6 +9,7 @@ from Auth.firebase_messaging.fcmpushclient import (
     FcmPushClientRunState,
     FcmRegisterConfig,
 )
+from Auth.firebase_messaging.proto.mcs_pb2 import Close  # pylint: disable=no-name-in-module
 
 
 def _make_client() -> FcmPushClient:
@@ -210,3 +212,86 @@ async def test_benign_ssl_close_notify_waits_instead_of_busy_spinning_when_reset
         f"readexactly() was called {reader.read_count} times in 50ms"
     )
     assert reset_calls == [], "must not call _reset() again while a reset is already in progress"
+
+
+class _CleanEofReader:
+    """A fake StreamReader that hits a clean EOF (server closed the socket
+    between messages) exactly once, then blocks forever."""
+
+    def __init__(self) -> None:
+        self.raised = False
+
+    async def readexactly(self, n: int) -> bytes:
+        if not self.raised:
+            self.raised = True
+            raise asyncio.IncompleteReadError(b"", n)
+        await asyncio.Event().wait()
+        raise AssertionError("should never reach here")
+
+
+async def test_clean_eof_reconnects_without_error_log(monkeypatch, caplog):
+    """Google's MCS server sometimes just closes the socket between messages,
+    surfacing as IncompleteReadError with 0 bytes read. That used to log a
+    full "Unexpected exception during read" ERROR traceback (and so send a
+    notification) for what is a routine reconnect."""
+
+    async def fake_connect_with_retry(self) -> bool:
+        return True
+
+    async def fake_login(self) -> None:
+        self.run_state = FcmPushClientRunState.STARTED
+
+    monkeypatch.setattr(
+        fcmpushclient_module.FcmPushClient,
+        "_connect_with_retry",
+        fake_connect_with_retry,
+    )
+    monkeypatch.setattr(fcmpushclient_module.FcmPushClient, "_login", fake_login)
+
+    client = _make_client()
+    client.config.reset_interval = 0
+    client.reset_lock = asyncio.Lock()
+    client.stopping_lock = asyncio.Lock()
+    client.do_listen = True
+    client.run_state = FcmPushClientRunState.STARTED
+    client.first_message = False
+    client.reader = _CleanEofReader()
+    client.writer = None
+
+    resets: list[bool] = []
+
+    async def fake_reset(self) -> None:
+        resets.append(True)
+
+    monkeypatch.setattr(fcmpushclient_module.FcmPushClient, "_reset", fake_reset)
+
+    task = asyncio.create_task(client._listen())
+    await asyncio.sleep(0.1)
+    task.cancel()
+    try:
+        await task
+    except (asyncio.CancelledError, Exception):
+        pass
+
+    assert resets == [True], "clean EOF must trigger a reconnect"
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+async def test_server_close_message_reconnects_without_warning(monkeypatch, caplog):
+    """A Close message from the server is a routine reconnect, not something
+    to send a WARNING notification about."""
+    client = _make_client()
+    client.reset_lock = asyncio.Lock()
+
+    resets: list[bool] = []
+
+    async def fake_reset(self) -> None:
+        resets.append(True)
+
+    monkeypatch.setattr(fcmpushclient_module.FcmPushClient, "_reset", fake_reset)
+
+    with caplog.at_level(logging.INFO):
+        await client._handle_message(Close())
+
+    assert resets == [True]
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]

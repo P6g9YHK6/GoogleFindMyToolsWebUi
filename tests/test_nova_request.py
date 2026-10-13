@@ -64,3 +64,50 @@ def test_nova_request_raises_after_exhausting_retries(monkeypatch):
     with pytest.raises(requests.exceptions.ConnectionError):
         nova_request("someScope", "00")
     assert len(calls) == nova_request_module.NOVA_REQUEST_RETRIES + 1
+
+
+GOOGLE_500_PAGE = (
+    "<html><head><title>Internal Server Error</title></head><body>\n\n\n"
+    "<h1>Internal Server Error</h1>\n<h2>Error 500</h2></body></html>"
+)
+
+
+def test_nova_request_retries_5xx_then_succeeds(monkeypatch):
+    responses = [FakeResponse(500, GOOGLE_500_PAGE), FakeResponse(200)]
+    monkeypatch.setattr(
+        nova_request_module.requests, "post", lambda *a, **kw: responses.pop(0),
+    )
+    assert nova_request("someScope", "00") == "deadbeef"
+    assert responses == []
+
+
+def test_nova_request_raises_clean_message_after_exhausting_5xx_retries(monkeypatch, caplog):
+    calls = []
+
+    def fake_post(*a, **kw):
+        calls.append(1)
+        return FakeResponse(500, GOOGLE_500_PAGE)
+
+    monkeypatch.setattr(nova_request_module.requests, "post", fake_post)
+    with pytest.raises(RuntimeError) as excinfo:
+        nova_request("someScope", "00")
+    assert len(calls) == nova_request_module.NOVA_REQUEST_RETRIES + 1
+    assert str(excinfo.value) == (
+        "Nova request to someScope failed with 500: Internal Server Error Error 500"
+    )
+    # Callers log the raised error; logging a WARNING here too sent a
+    # second notification for the same failure.
+    assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+
+def test_nova_request_does_not_retry_4xx(monkeypatch):
+    calls = []
+
+    def fake_post(*a, **kw):
+        calls.append(1)
+        return FakeResponse(404, "Not Found")
+
+    monkeypatch.setattr(nova_request_module.requests, "post", fake_post)
+    with pytest.raises(RuntimeError, match="404"):
+        nova_request("someScope", "00")
+    assert len(calls) == 1
