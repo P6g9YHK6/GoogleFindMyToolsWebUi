@@ -4,8 +4,8 @@ import time
 from fastapi import APIRouter, Request
 
 from webui import device_location_store
-from webui.forwarders import config_store
 from webui.deps import locate_device
+from webui.forwarders import config_store
 from webui.templating import templates
 from webui.ws import manager
 
