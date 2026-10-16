@@ -5,7 +5,7 @@ from datetime import datetime
 
 from croniter import croniter
 
-from webui import demo_mode, device_location_store, settings_store, ws
+from webui import demo_mode, device_location_store, settings_store, staleness, ws
 from webui.auth_state import is_logged_in
 from webui.deps import locate_device
 from webui.forwarders import config_store, latest_values_store, log_store, semantic_map
@@ -179,17 +179,31 @@ async def _poll_device(canonic_id: str):
         if due_indices:
             # Display-only - forwarding above already saw the full
             # `locations`; this is just what's broadcast to the Devices
-            # page's live map pins.
+            # page's live map pins. Newest first - see
+            # device_location_store.sort_newest_first's own docstring.
             display_locations = locations
-            if display_locations and settings_store.load().get("devices_page_most_recent_only"):
-                display_locations = device_location_store.most_recent_only(display_locations)
+            if display_locations:
+                display_locations = device_location_store.sort_newest_first(display_locations)
             await ws.manager.broadcast({
                 "type": "locate_result",
                 "canonic_id": canonic_id,
-                "name": name,
+                # google_name/raw display_name here, not the locally-scoped
+                # name/alias above (name falls back to canonic_id, which
+                # would otherwise show up as its own redundant "alias") -
+                # matches webui/routers/devices.py's page-load "name"/"alias"
+                # so the map popup (static/app.js's popupLabel) reads the
+                # same regardless of which path reported the ping.
+                "name": google_name,
+                "alias": device_cfg.get("display_name"),
                 "locations": display_locations,
                 "source": "poll",
             })
+
+        # A device with endpoints is covered here, on every poll tick,
+        # instead of by webui/staleness.py's own separate sweep - see that
+        # module's docstring. No-ops immediately for a device with alerting
+        # not enabled/muted, so this is cheap to call unconditionally.
+        staleness.check_device(canonic_id, device_cfg)
 
 
 async def forward_now(canonic_id: str, index: int) -> dict | None:

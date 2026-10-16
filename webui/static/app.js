@@ -2,10 +2,90 @@ document.addEventListener("DOMContentLoaded", () => {
   const mapEl = document.getElementById("map");
   if (!mapEl) return;
 
+  // Restored before L.map() below reads the container's size, so the very
+  // first render is already the right height instead of starting at the
+  // CSS default and jumping once the ResizeObserver below corrects it.
+  const MAP_HEIGHT_KEY = "gfmt-map-height";
+  let savedMapHeight = null;
+  try { savedMapHeight = localStorage.getItem(MAP_HEIGHT_KEY); } catch (e) {}
+  if (savedMapHeight) mapEl.style.height = savedMapHeight;
+
   const map = L.map("map").setView([0, 0], 2);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap contributors",
   }).addTo(map);
+  // Clears the bottom-right corner for .map-resize-handle below - Leaflet
+  // puts its attribution control there by default.
+  map.attributionControl.setPosition("bottomleft");
+
+  // Every size change (dragged via .map-resize-handle below, or entering/
+  // leaving fullscreen below) needs an explicit invalidateSize() or the tile
+  // grid stays clipped/misaligned to the old height. Also persists the new
+  // height per viewer, the same per-browser localStorage convention as
+  // card_reorder.js's saved card order - except while fullscreen, where
+  // #map-wrap's CSS (not mapEl.style.height) is what's driving the size, and
+  // saving it would otherwise overwrite the real saved height with the
+  // viewport's own, applied back as an inline style the next time this page
+  // loads outside of fullscreen.
+  const mapWrapEl = document.getElementById("map-wrap");
+  new ResizeObserver(() => {
+    map.invalidateSize();
+    if (document.fullscreenElement === mapWrapEl) return;
+    try { localStorage.setItem(MAP_HEIGHT_KEY, `${mapEl.offsetHeight}px`); } catch (e) {}
+  }).observe(mapEl);
+
+  // Fullscreen toggles #map-wrap itself (not just #map) so the resize
+  // handle/button stay reachable rather than being left behind outside the
+  // fullscreen element. Falls back to the webkit-prefixed API for older
+  // Safari, which never shipped the unprefixed one.
+  const fullscreenBtn = document.getElementById("map-fullscreen-btn");
+  function isMapFullscreen() {
+    return document.fullscreenElement === mapWrapEl;
+  }
+  function updateFullscreenBtn() {
+    if (!fullscreenBtn) return;
+    const active = isMapFullscreen();
+    fullscreenBtn.querySelector(".icon use").setAttribute("href", active ? "#i-collapse" : "#i-expand");
+    fullscreenBtn.title = active ? "Exit fullscreen" : "Fullscreen";
+  }
+  fullscreenBtn?.addEventListener("click", () => {
+    if (isMapFullscreen()) {
+      (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+    } else {
+      (mapWrapEl.requestFullscreen || mapWrapEl.webkitRequestFullscreen)?.call(mapWrapEl);
+    }
+  });
+  document.addEventListener("fullscreenchange", updateFullscreenBtn);
+  document.addEventListener("webkitfullscreenchange", updateFullscreenBtn);
+
+  // A plain CSS `resize` handle on #map itself fights Leaflet for the same
+  // mousedown/drag it uses to pan the map - dragging the native grip just
+  // panned the tiles instead of resizing the container. This is our own
+  // handle instead, sitting above every Leaflet pane (see app.css's
+  // z-index) so it gets the pointer events first. Document-level
+  // move/up listeners rather than the handle's own setPointerCapture -
+  // see card_reorder.js's own note on why.
+  const mapResizeHandle = document.querySelector(".map-resize-handle");
+  const MAP_MIN_HEIGHT = 200;
+  mapResizeHandle?.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = mapEl.offsetHeight;
+    document.body.classList.add("map-resizing");
+
+    const onMove = (ev) => {
+      const maxHeight = window.innerHeight * 0.8;
+      const nextHeight = Math.min(maxHeight, Math.max(MAP_MIN_HEIGHT, startHeight + (ev.clientY - startY)));
+      mapEl.style.height = `${nextHeight}px`;
+    };
+    const stop = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", stop);
+      document.body.classList.remove("map-resizing");
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", stop);
+  });
 
   // Shown until the devices table's (often slow) load actually reaches the
   // map - see seedMapMarkers and _not_signed_in.html's script.
@@ -73,7 +153,19 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function popupLabel(name, loc, source) {
+  // Mirrors webui/templating.py's ping_time formatting ("14:32 · 04 Oct
+  // 2026") so a pin's popup reads the same as that same location's hover
+  // title in the table - time first since that's usually the part worth a
+  // glance, month name instead of numeric to sidestep DD/MM vs MM/DD.
+  function formatPingTime(ts) {
+    if (!ts) return "";
+    const d = new Date(ts * 1000);
+    const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+    const date = d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+    return `${time} · ${date}`;
+  }
+
+  function popupLabel(name, alias, loc, source) {
     const bits = [];
     // A semantic reading with mapped coordinates (see
     // webui/forwarders/semantic_map.py) still carries is_own_report=true
@@ -83,7 +175,13 @@ document.addEventListener("DOMContentLoaded", () => {
     else if (loc.is_own_report) bits.push("own report");
     else if (loc.status) bits.push(loc.status.toLowerCase());
     if (source) bits.push(source);
-    return bits.length ? `${name} (${bits.join(", ")})` : name;
+
+    const title = alias ? `${name} <span class="popup-alias">(${alias})</span>` : name;
+    const lines = [title];
+    const time = formatPingTime(loc.time);
+    if (time) lines.push(time);
+    if (bits.length) lines.push(bits.join(", "));
+    return lines.join("<br>");
   }
 
   // Hovering a location's row in the table bounces its map pin; hovering a
@@ -118,7 +216,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // keyed by position in the locations array so each dot keeps its own
   // color and identity across updates. Returns the latlngs it plotted, for
   // callers that need to fit/pan the map to them.
-  function upsertDeviceMarkers(canonicId, name, locations, source) {
+  function upsertDeviceMarkers(canonicId, name, alias, locations, source) {
     const slots = markersByDevice.get(canonicId) || new Map();
     const seenIndexes = new Set();
     const latlngs = [];
@@ -133,7 +231,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const latlng = [loc.latitude, loc.longitude];
       const key = `${canonicId}:${index}`;
       const color = colorForDeviceLocation(canonicId, index);
-      const label = popupLabel(name, loc, source);
+      const label = popupLabel(name, alias, loc, source);
 
       if (slots.has(index)) {
         slots.get(index).setLatLng(latlng).setPopupContent(label);
@@ -160,6 +258,28 @@ document.addEventListener("DOMContentLoaded", () => {
     return latlngs;
   }
 
+  // canonicId -> {name, alias, locations, source} - every device's full location
+  // list, independent of how many pins are actually on the map right now.
+  // Kept around so a "+N more pings" disclosure (see devices/_locate_cell.html)
+  // being opened/closed later can re-derive the visible subset without a
+  // round-trip - the data's already here from the initial load/live update.
+  const deviceLocationsByCanonicId = new Map();
+
+  // canonicId of every device whose "+N more pings" disclosure is currently
+  // open - only those get pins beyond their single newest one. Starts empty
+  // since every .ping-overflow <details> renders closed by default.
+  const expandedOverflows = new Set();
+
+  // Plots just the currently-visible subset for one device: its newest
+  // location always, the rest only while its ping-overflow disclosure is
+  // open - see the "toggle" listener below for what flips that set.
+  function renderDeviceMarkers(canonicId) {
+    const data = deviceLocationsByCanonicId.get(canonicId);
+    if (!data) return [];
+    const visible = expandedOverflows.has(canonicId) ? data.locations : (data.locations || []).slice(0, 1);
+    return upsertDeviceMarkers(canonicId, data.name, data.alias, visible, data.source);
+  }
+
   // Seeds the map with whatever locations are already on file, so pins show
   // up on page load instead of waiting for a live locate - called by
   // devices/_table.html's inline script once its htmx "load" response
@@ -167,7 +287,10 @@ document.addEventListener("DOMContentLoaded", () => {
   window.seedMapMarkers = function (devices) {
     const allLatLngs = [];
     for (const device of devices || []) {
-      allLatLngs.push(...upsertDeviceMarkers(device.canonic_id, device.name, device.locations, null));
+      deviceLocationsByCanonicId.set(device.canonic_id, {
+        name: device.name, alias: device.alias, locations: device.locations, source: null,
+      });
+      allLatLngs.push(...renderDeviceMarkers(device.canonic_id));
     }
     if (allLatLngs.length === 1) {
       map.setView(allLatLngs[0], 13);
@@ -177,6 +300,22 @@ document.addEventListener("DOMContentLoaded", () => {
     window.hideMapLoading();
   };
 
+  // A device's ping-overflow disclosure opening/closing (a direct click, or
+  // the "Expand/Collapse all" button in devices/list.html setting .open in
+  // bulk - both dispatch this same native event) re-derives that device's
+  // visible pins immediately, without waiting for the next live update.
+  // "toggle" doesn't bubble, but a capturing listener on document still sees
+  // it on the way down to its target.
+  document.addEventListener("toggle", (e) => {
+    const details = e.target;
+    if (!details.matches || !details.matches(".ping-overflow")) return;
+    const canonicId = details.closest("[data-canonic-id]")?.dataset.canonicId;
+    if (!canonicId) return;
+    if (details.open) expandedOverflows.add(canonicId);
+    else expandedOverflows.delete(canonicId);
+    renderDeviceMarkers(canonicId);
+  }, true);
+
   function connect() {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(`${proto}//${location.host}/ws/locations`);
@@ -185,8 +324,16 @@ document.addEventListener("DOMContentLoaded", () => {
       const msg = JSON.parse(event.data);
       if (msg.type !== "locate_result") return;
 
-      const latlngs = upsertDeviceMarkers(msg.canonic_id, msg.name, msg.locations, msg.source);
+      deviceLocationsByCanonicId.set(msg.canonic_id, {
+        name: msg.name, alias: msg.alias, locations: msg.locations, source: msg.source,
+      });
+      const latlngs = renderDeviceMarkers(msg.canonic_id);
       if (latlngs.length) map.panTo(latlngs[latlngs.length - 1]);
+
+      const times = (msg.locations || [])
+        .filter((loc) => !loc.is_semantic && loc.time)
+        .map((loc) => loc.time);
+      if (times.length) _updateStalenessRow(msg.canonic_id, Math.max(...times));
     };
 
     socket.onclose = () => setTimeout(connect, 3000);
@@ -231,18 +378,19 @@ window.startNextPollCountdowns = function () {
   _nextPollTimer = setInterval(tick, 1000);
 };
 
-// Staleness page: live "Xh Ym ago" under the "Last update" column (see
-// staleness/_table.html's data-last-fix-ts) - the inverse of the next-poll
-// countdown above, same one-shared-interval-per-page, re-armed-on-every-
-// htmx-reload approach. Also listens on the same /ws/locations channel the
-// map/devices page already uses (see connect() above) - a locate_result for
-// a device shown in this table bumps its row's last-fix timestamp and
-// re-derives fresh/stale client-side against the threshold already embedded
-// in that row's data attributes (see webui/staleness.py's compute_status,
-// which this intentionally mirrors in miniature - just enough to flip a
-// badge between "Fresh" and "Stale" without waiting for the next full
-// /staleness/table reload; the background sweep, not this, is what still
-// actually sends the alert).
+// Each device card's Alerts disclosure: live "Xh Ym ago" under its last-fix
+// line (see devices/_table.html's data-last-fix-ts) - the inverse of the
+// next-poll countdown above, same one-shared-interval-per-page, re-armed-
+// on-every-htmx-reload approach. _updateStalenessRow is called from
+// connect()'s onmessage above (same /ws/locations socket the map already
+// uses - no separate connection) - a locate_result for a device shown on
+// this page bumps its card's last-fix timestamp and re-derives fresh/stale
+// client-side against the threshold already embedded in that card's data
+// attributes (see webui/staleness.py's compute_status, which this
+// intentionally mirrors in miniature - just enough to flip a badge between
+// "Fresh" and "Stale" without waiting for the next full /devices/table
+// reload; the background sweep, not this, is what still actually sends the
+// alert).
 let _stalenessAgoTimer = null;
 
 function _formatElapsed(diffMs) {
@@ -273,7 +421,7 @@ window.startStalenessAgoTicker = function () {
 };
 
 function _updateStalenessRow(canonicId, newestFixTs) {
-  const row = document.querySelector(`#staleness-table tr[data-canonic-id="${CSS.escape(canonicId)}"]`);
+  const row = document.querySelector(`#device-table [data-canonic-id="${CSS.escape(canonicId)}"]`);
   if (!row || !newestFixTs) return;
 
   const agoEl = row.querySelector("[data-last-fix-ts]");
@@ -287,31 +435,12 @@ function _updateStalenessRow(canonicId, newestFixTs) {
   const ageS = Date.now() / 1000 - newestFixTs;
   const statusCell = row.querySelector(".staleness-status");
   if (!statusCell) return;
-  statusCell.innerHTML = ageS > thresholdS
-    ? '<span class="log-error">Stale</span>'
-    : '<span class="log-ok">Fresh</span>';
+  // Fresh isn't spelled out here at all - see devices/_table.html's own
+  // comment on this same span - that's just the header's Fresh/Stale chip
+  // restated, so a live update that lands "fresh" clears this back to empty
+  // instead of writing a second "Fresh" next to it.
+  statusCell.innerHTML = ageS > thresholdS ? '<span class="log-error">Stale</span>' : "";
 }
-
-document.addEventListener("DOMContentLoaded", () => {
-  if (!document.getElementById("staleness-table")) return;
-
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-
-  function connectStalenessSocket() {
-    const socket = new WebSocket(`${proto}//${location.host}/ws/locations`);
-    socket.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.type !== "locate_result") return;
-      const times = (msg.locations || [])
-        .filter((loc) => !loc.is_semantic && loc.time)
-        .map((loc) => loc.time);
-      if (times.length) _updateStalenessRow(msg.canonic_id, Math.max(...times));
-    };
-    socket.onclose = () => setTimeout(connectStalenessSocket, 3000);
-  }
-
-  connectStalenessSocket();
-});
 
 // Devices table photo -> full-size popup (see devices/_table.html's
 // .device-thumb-btn and devices/list.html's #device-image-modal) - also

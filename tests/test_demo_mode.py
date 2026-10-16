@@ -187,25 +187,25 @@ def test_logs_page_shows_canned_entries_in_demo_mode(client, monkeypatch):
     assert "Demo mode active" in resp.text
 
 
-def test_staleness_table_shows_fake_devices_in_demo_mode(client, monkeypatch, tmp_path):
+def test_devices_table_alerts_disclosure_shows_fake_devices_in_demo_mode(client, monkeypatch, tmp_path):
     from webui import config
 
     monkeypatch.setattr(config, "DEMO_MODE", True)
     _redirect_data_paths(monkeypatch, tmp_path)
-    resp = client.get("/staleness/table")
+    resp = client.get("/devices/table")
     assert resp.status_code == 200
     assert DEMO_DEVICE_NAME in resp.text
     assert "Umbrella" in resp.text  # not the literal quotes - HTML-escaped by Jinja
 
 
-def test_staleness_toggle_not_persisted_in_demo_mode(client, monkeypatch, tmp_path):
+def test_device_alerts_toggle_not_persisted_in_demo_mode(client, monkeypatch, tmp_path):
     from webui import config
 
     monkeypatch.setattr(config, "DEMO_MODE", True)
     _redirect_data_paths(monkeypatch, tmp_path)
 
     resp = _post_form(
-        client, f"/staleness/devices/{DEMO_CANONIC_ID}",
+        client, f"/devices/{DEMO_CANONIC_ID}/staleness",
         enabled="1", threshold_preset="21600", repeat_preset="off", message_template="", muted="0",
     )
     assert resp.status_code == 200
@@ -310,16 +310,6 @@ def test_settings_page_unaffected_by_onboarding_placeholder(client, monkeypatch)
     monkeypatch.setattr(auth_state, "is_logged_in", lambda: False)
     monkeypatch.setattr(demo_mode, "is_logged_in", lambda: False)
     resp = client.get("/settings")
-    assert resp.status_code == 200
-    assert DEMO_DEVICE_NAME not in resp.text
-
-
-def test_staleness_page_unaffected_by_onboarding_placeholder(client, monkeypatch):
-    from webui import auth_state, demo_mode
-
-    monkeypatch.setattr(auth_state, "is_logged_in", lambda: False)
-    monkeypatch.setattr(demo_mode, "is_logged_in", lambda: False)
-    resp = client.get("/staleness")
     assert resp.status_code == 200
     assert DEMO_DEVICE_NAME not in resp.text
 

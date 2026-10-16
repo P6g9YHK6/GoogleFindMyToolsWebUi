@@ -629,7 +629,11 @@ class FcmPushClient:  # pylint:disable=too-many-instance-attributes
         self.input_stream_id += 1
 
         if isinstance(msg, Close):
-            self._log_warn_with_limit("Server sent Close message, resetting")
+            # Google's MCS endpoint routinely closes long-lived connections;
+            # reconnecting is the normal response, not something to alert on.
+            # Still counted, so a server that closes every connection before
+            # anything else arrives hits the 3-strike shutdown.
+            _logger.info("Server sent Close message, reconnecting")
             if self._try_increment_error_count(ErrorType.CONNECTION):
                 await self._reset()
             return
@@ -818,6 +822,25 @@ class FcmPushClient:  # pylint:disable=too-many-instance-attributes
                                 osex.reason,
                             )
                             await self._reset()
+                    elif (
+                        isinstance(osex, asyncio.IncompleteReadError)
+                        and not osex.partial
+                    ):
+                        # Clean EOF between messages: the server closed the
+                        # socket without a Close message (idle timeout etc).
+                        # Routine, so reconnect without an ERROR traceback;
+                        # still counted toward the 3-strike shutdown.
+                        if self._try_increment_error_count(ErrorType.CONNECTION):
+                            if self.reset_lock.locked():
+                                # See the TLS close branch above - avoid a
+                                # busy-spin on the stale reader.
+                                async with self.reset_lock:
+                                    pass
+                            else:
+                                _logger.info(
+                                    "Server closed the connection, reconnecting"
+                                )
+                                await self._reset()
                     else:
                         _logger.exception("Unexpected exception during read\n")
                         if self._try_increment_error_count(ErrorType.CONNECTION):

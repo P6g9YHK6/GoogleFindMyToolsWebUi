@@ -1,7 +1,7 @@
 """Deterministic per-device hue, per-location shade for map pins.
 
-Shared between the server-rendered list swatches (devices/_locate_cell.html,
-devices/_map_links_cell.html) and the client-side map pins
+Shared between the server-rendered list swatches (devices/_locate_cell.html)
+and the client-side map pins
 (static/app.js's hueForDevice/colorForDeviceLocation) - both hash a
 device's canonic_id into one base hue with the same algorithm, then pick a
 shade of it for a given location index from the same SHADE_LIGHTNESS table,

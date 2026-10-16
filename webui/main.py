@@ -37,7 +37,6 @@ from webui.routers import (
     sound,
     vnc_proxy,
 )
-from webui.routers import staleness as staleness_router
 
 # Every module across the app (webui.*, Auth.*, NovaApi.*, ...) logs through
 # the standard `logging` module and propagates up to root - this is the one
@@ -99,7 +98,6 @@ app.include_router(debug_export.router)
 app.include_router(settings.router)
 app.include_router(logs.router)
 app.include_router(metrics.router)
-app.include_router(staleness_router.router)
 app.include_router(vnc_proxy.router)
 
 

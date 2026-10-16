@@ -14,11 +14,11 @@ def test_devices_table_logged_in(client):
     assert FAKE_DEVICE_NAME in resp.text
 
 
-def test_devices_table_is_sortable(client):
-    """Opts into static/tables.js's click-to-sort/drag-to-resize columns."""
+def test_devices_table_is_a_card_grid(client):
     resp = client.get("/devices/table")
     assert resp.status_code == 200
-    assert '<table class="sortable-table" data-table-id="devices">' in resp.text
+    assert 'class="device-grid"' in resp.text
+    assert 'class="device-card"' in resp.text
 
 
 def test_devices_table_shows_alias_and_endpoint_count(client, tmp_path, monkeypatch):
@@ -39,25 +39,25 @@ def test_devices_table_shows_alias_and_endpoint_count(client, tmp_path, monkeypa
 
     resp = client.get("/devices/table")
     assert resp.status_code == 200
-    assert '<th data-col="alias">Alias</th>' in resp.text
-    assert '<th data-col="endpoints">Endpoints</th>' in resp.text
     assert "Garage Tracker" in resp.text
-    assert "<td>2</td>" in resp.text
+    assert 'class="device-card-alias"' in resp.text
+    assert ">Garage Tracker</span>" in resp.text
+    assert "Endpoints: 2" in resp.text
 
 
 def test_devices_table_alias_and_endpoint_count_default_for_an_unconfigured_device(client):
     resp = client.get("/devices/table")
     assert resp.status_code == 200
-    assert "<td>-</td>" in resp.text  # no alias set yet
-    assert "<td>0</td>" in resp.text  # no endpoints configured yet
+    assert "device-card-alias" not in resp.text  # no alias set yet - omitted, not a bare "-"
+    assert "Endpoints: 0" in resp.text  # no endpoints configured yet
 
 
-def test_devices_table_last_seen_header_credits_the_find_hub(client):
+def test_devices_table_credits_the_find_hub_for_last_seen(client):
     """Clarifies that this timestamp is Google's Find My Device network's
     own reporting, not e.g. this app's last poll."""
     resp = client.get("/devices/table")
     assert resp.status_code == 200
-    assert '<th data-col="last_seen">Last seen by find hub</th>' in resp.text
+    assert "Seen by Find Hub:" in resp.text
 
 
 def test_devices_table_shows_last_seen_when_available(client):
@@ -90,20 +90,21 @@ def test_devices_table_prepopulates_from_a_prior_locate_no_click_needed(client, 
     resp = client.get("/devices/table")
     assert resp.status_code == 200
     assert "12.50000, 34.50000" in resp.text
-    assert '<th data-col="polled_at">Polled at</th>' in resp.text
+    assert "Polled:" in resp.text
     from datetime import datetime
 
     assert datetime.fromtimestamp(1700000000).strftime("%Y-%m-%d %H:%M:%S") in resp.text
 
 
-def test_devices_table_shows_only_the_most_recent_reading_by_default(client, tmp_path, monkeypatch):
-    """devices_page_most_recent_only defaults to on (see settings_store.py) -
-    a batch with an older and a newer reading only shows the newer one."""
+def test_devices_table_shows_the_newest_reading_first_with_the_rest_collapsed(client, tmp_path, monkeypatch):
+    """Google can return several readings in one response, not necessarily
+    in chronological order - the Devices page sorts them newest-first (see
+    device_location_store.sort_newest_first) and shows just the newest
+    inline, with the rest behind a "+N more pings" disclosure."""
     from webui import config, device_location_store
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
-    monkeypatch.setattr(config, "APP_SETTINGS_PATH", tmp_path / "config.yaml")
 
     device_location_store.set_last_location(
         FAKE_CANONIC_ID,
@@ -117,33 +118,16 @@ def test_devices_table_shows_only_the_most_recent_reading_by_default(client, tmp
     resp = client.get("/devices/table")
     assert resp.status_code == 200
     assert "12.50000, 34.50000" in resp.text
-    assert "1.00000, 2.00000" not in resp.text
-
-
-def test_devices_table_shows_the_full_batch_when_most_recent_only_is_off(client, tmp_path, monkeypatch):
-    from webui import config, device_location_store, settings_store
-
-    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
-    monkeypatch.setattr(config, "APP_SETTINGS_PATH", tmp_path / "config.yaml")
-    settings_store.save({**settings_store.load(), "devices_page_most_recent_only": False})
-
-    device_location_store.set_last_location(
-        FAKE_CANONIC_ID,
-        [
-            {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 100, "map_links": {}},
-            {"is_semantic": False, "latitude": 12.5, "longitude": 34.5, "time": 200, "map_links": {}},
-        ],
-        fetched_at=1700000000,
-    )
-
-    resp = client.get("/devices/table")
-    assert resp.status_code == 200
-    assert "12.50000, 34.50000" in resp.text
+    assert "+1 more ping" in resp.text
+    # Still in the response (inside the collapsed <details>), not dropped.
     assert "1.00000, 2.00000" in resp.text
+    assert resp.text.index("12.50000, 34.50000") < resp.text.index("1.00000, 2.00000")
 
 
-def test_devices_table_shows_a_map_links_column_with_every_provider(client, tmp_path, monkeypatch):
+def test_devices_table_shows_map_links_for_every_provider(client, tmp_path, monkeypatch):
+    """Map links render inline in the "Last locate result" cell's own Map
+    popover now (see devices/_locate_cell.html) rather than a separate
+    column - still every provider, in the same order."""
     from webui import config, device_location_store
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
@@ -159,7 +143,7 @@ def test_devices_table_shows_a_map_links_column_with_every_provider(client, tmp_
 
     resp = client.get("/devices/table")
     assert resp.status_code == 200
-    assert '<th data-col="map">Map</th>' in resp.text
+    assert "map-menu" in resp.text
     # OSM is the default/primary provider - listed first, not just present
     assert resp.text.index("openstreetmap.org") < resp.text.index("google.com/maps")
     for host in ("openstreetmap.org", "google.com/maps", "maps.apple.com", "bing.com/maps", "waze.com"):
@@ -235,22 +219,23 @@ def test_devices_table_has_no_countdown_element_when_not_scheduled(client):
     assert "data-next-poll-ts" not in resp.text
 
 
-def test_next_poll_str_is_none_with_no_valid_cron(monkeypatch, tmp_path):
+def test_devices_table_has_no_countdown_element_with_only_an_invalid_cron(client, tmp_path, monkeypatch):
     from webui import config
     from webui.forwarders import config_store
-    from webui.routers.devices import _next_poll_str
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
     monkeypatch.setattr(config, "FORWARDING_CONFIG_LEGACY_JSON_PATH", tmp_path / "forwarding_config.json")
 
-    assert _next_poll_str(FAKE_CANONIC_ID) is None  # no config at all yet
-
     config_store.set_device_config(FAKE_CANONIC_ID, {
         "display_name": FAKE_DEVICE_NAME,
         "endpoints": [{"type": "traccar", "url": "http://x/", "cron": "not-a-cron"}],
     })
-    assert _next_poll_str(FAKE_CANONIC_ID) is None
+
+    resp = client.get("/devices/table")
+    assert resp.status_code == 200
+    assert "Not scheduled" in resp.text
+    assert "data-next-poll-ts" not in resp.text
 
 
 def test_devices_table_uses_persisted_location_time_when_proto_has_no_last_seen(client, tmp_path, monkeypatch):
@@ -395,5 +380,55 @@ def test_devices_table_omits_sharing_line_when_only_the_owner_has_access(client,
     resp = client.get("/devices/table")
     assert resp.status_code == 200
     assert "Shared with" not in resp.text
+
+
+def test_devices_table_shows_alerts_disclosure(client):
+    resp = client.get("/devices/table")
+    assert resp.status_code == 200
+    assert "Alerts" in resp.text
+    assert "Tracking off" in resp.text  # not opted in yet
+
+
+def test_save_device_alerts_via_form(client, tmp_path, monkeypatch):
+    from webui import config
+    from webui.forwarders import latest_values_store
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+    monkeypatch.setattr(config, "FORWARDING_CONFIG_LEGACY_JSON_PATH", tmp_path / "forwarding_config.json")
+
+    resp = client.post(
+        f"/devices/{FAKE_CANONIC_ID}/staleness",
+        data={
+            "enabled": "1",
+            "threshold_preset": "86400",
+            "repeat_preset": "off",
+            "message_template": "Custom: {{device_name}}",
+            "muted": "0",
+        },
+    )
+    assert resp.status_code == 200
+
+    saved = latest_values_store.get_device_staleness(FAKE_CANONIC_ID)
+    assert saved["enabled"] is True
+    assert saved["threshold_s"] == 86400
+    assert saved["repeat_s"] is None
+    assert saved["message_template"] == "Custom: {{device_name}}"
+
+
+def test_save_device_alerts_accepts_a_custom_hours_value(client, tmp_path, monkeypatch):
+    from webui import config
+    from webui.forwarders import latest_values_store
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+    monkeypatch.setattr(config, "FORWARDING_CONFIG_LEGACY_JSON_PATH", tmp_path / "forwarding_config.json")
+
+    resp = client.post(
+        f"/devices/{FAKE_CANONIC_ID}/staleness",
+        data={"enabled": "1", "threshold_preset": "", "threshold_custom_hours": "5", "repeat_preset": "off"},
+    )
+    assert resp.status_code == 200
+    assert latest_values_store.get_device_staleness(FAKE_CANONIC_ID)["threshold_s"] == 5 * 3600
 
 

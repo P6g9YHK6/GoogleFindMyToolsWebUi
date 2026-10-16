@@ -1,117 +1,175 @@
-{% from "_macros.html" import columns_menu %}
-{{ columns_menu([
-  ("name", "Name"), ("alias", "Alias"), ("device", "Device"), ("actions", "Actions"),
-  ("locate_result", "Last locate result"), ("map", "Map"), ("last_seen", "Last seen by find hub"),
-  ("endpoints", "Endpoints"), ("polled_at", "Polled at"), ("next_poll", "Next poll"),
-]) }}
-<div class="table-scroll">
-<table class="sortable-table" data-table-id="devices">
-  <thead>
-    <tr>
-      <th data-col="name">Name</th><th data-col="alias">Alias</th><th data-col="device">Device</th><th data-col="actions">Actions</th><th data-col="locate_result">Last locate result</th><th data-col="map">Map</th><th data-col="last_seen">Last seen by find hub</th><th data-col="endpoints">Endpoints</th><th data-col="polled_at">Polled at</th><th data-col="next_poll">Next poll</th>
-    </tr>
-  </thead>
-  <tbody>
-  {% for device in devices %}
-    <tr>
-      <td>{{ device.name }}</td>
-      {# The local nickname set on the Settings page (see
-         webui/routers/settings.py's "Device alias" field) - blank until
-         one's actually set, same as that field itself. #}
-      <td>{{ device.alias or "-" }}</td>
-      <td class="device-cell">
-        {# Category/photo straight from Google's own response - see
-           ProtoDecoders.decoder.get_device_details and
-           webui/routers/devices.py's _device_type_label. Manufacturer/
-           model/carrier/codename/registration date/IMEI/sharing info are
-           real but more sensitive (IMEI especially) or just verbose, so
-           they stay behind this <details> toggle rather than in the
-           always-visible row - same "advanced, not hidden" pattern as the
-           cron builder's "Advanced: custom cron schedule" on the Settings
-           page. #}
-        <div class="device-summary">
-          {% if device.image_url %}
-            {# Same URL as the full-size popup (see static/app.js's
-               .device-thumb-btn handler and devices/list.html's
-               #device-image-modal) - Google already serves one image per
-               device, just shown here shrunk to an icon by .device-thumb's
-               own CSS, so opening it larger needs no different URL. #}
-            <button type="button" class="device-thumb-btn" data-image-url="{{ device.image_url }}" data-image-label="{{ device.name }}" aria-label="View full-size photo of {{ device.name }}">
-              <img class="device-thumb" src="{{ device.image_url }}" alt="" loading="lazy">
-            </button>
+{% macro duration_field(base_name, value_s, allow_off) %}
+  <span class="duration-field">
+    <select name="{{ base_name }}_preset" class="duration-preset">
+      {% if allow_off %}
+        <option value="{{ repeat_off }}" {% if value_s is none %}selected{% endif %}>Off (alert once)</option>
+      {% endif %}
+      {% for label, seconds in duration_presets %}
+        <option value="{{ seconds }}" {% if value_s == seconds %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+      <option value="" {% if value_s is not none and value_s not in duration_preset_values %}selected{% endif %}>Custom…</option>
+    </select>
+    <input type="number" name="{{ base_name }}_custom_hours" class="duration-custom" min="0.5" step="0.5"
+           placeholder="hours"
+           value="{% if value_s is not none and value_s not in duration_preset_values %}{{ (value_s / 3600) | round(2) }}{% endif %}"
+           {% if value_s is none or value_s in duration_preset_values %}hidden{% endif %}>
+  </span>
+{% endmacro %}
+
+<div class="device-grid" data-reorder-key="devices">
+{% for device in devices %}
+  <div class="device-card" data-canonic-id="{{ device.canonic_id }}"
+       data-enabled="{{ '1' if device.alerts_status.enabled else '0' }}"
+       data-muted="{{ '1' if device.alerts_status.muted else '0' }}"
+       data-threshold-s="{{ device.alerts_status.threshold_s or '' }}">
+    <div class="device-card-head">
+      <div>
+        <b class="device-card-name" title="{{ device.name }} is Google's own name for this device">{{ device.name }}</b>
+        {% if device.alias %}<span class="device-card-alias" title="Local nickname, set from the Edit link below">{{ device.alias }}</span>{% endif %}
+      </div>
+      <div class="device-card-head-right">
+        {% set status = device.staleness_display %}
+        {% if status and status.state == "fresh" %}
+          <span class="status-chip status-chip--fresh" title="Newest ping is {{ format_duration(status.age_s) }} old - counted fresh under {{ format_duration(status.threshold_s) }}"><i></i>Fresh</span>
+        {% elif status and status.state == "stale" %}
+          <span class="status-chip status-chip--stale" title="Newest ping is {{ format_duration(status.age_s) }} old - stale past {{ format_duration(status.threshold_s) }}"><i></i>Stale</span>
+        {% endif %}
+        {% if not device.alerts_status.enabled %}
+          <span class="status-chip status-chip--off" title="No alert will be sent, no matter how old this device's newest ping gets"><i></i>Tracking off</span>
+        {% endif %}
+        <span class="status-chip status-chip--neutral" title="How many forwarding endpoints are configured for this device - see Forwarding below"><svg class="icon icon-sm"><use href="#i-send"/></svg>{{ device.endpoint_count }}</span>
+        <button type="button" class="card-drag-handle" aria-label="Drag to reorder" title="Drag to reorder"></button>
+      </div>
+    </div>
+
+    <div class="device-summary">
+      {% if device.image_url %}
+        <button type="button" class="device-thumb-btn" data-image-url="{{ device.image_url }}" data-image-label="{{ device.name }}" aria-label="View full-size photo of {{ device.name }}" title="View full-size photo">
+          <img class="device-thumb" src="{{ device.image_url }}" alt="" loading="lazy">
+        </button>
+      {% endif %}
+      {% if device.type_label %}<span title="Device type reported by Google">{{ device.type_label }}</span>{% endif %}
+    </div>
+
+    <div id="locate-result-{{ loop.index }}">
+      {% set canonic_id = device.canonic_id %}
+      {% set name = device.name %}
+      {% set locations = device.last_locations %}
+      {% set fetched_at_str = device.last_fetched_at_str %}
+      {% include "devices/_locate_cell.html" %}
+    </div>
+
+    {% if device.manufacturer or device.model or device.carrier or device.codename or device.registered_at_str or device.imei or device.shared_with %}
+      <details class="device-details">
+        <summary title="Hardware info reported by Google for this device">Details</summary>
+        <ul>
+          {% if device.manufacturer %}<li>Manufacturer: {{ device.manufacturer }}</li>{% endif %}
+          {% if device.model %}<li>Model: {{ device.model }}</li>{% endif %}
+          {% if device.carrier %}<li>Carrier: {{ device.carrier }}</li>{% endif %}
+          {% if device.codename %}<li>Codename: {{ device.codename }}</li>{% endif %}
+          {% if device.registered_at_str %}<li>Registered: {{ device.registered_at_str }}</li>{% endif %}
+          {% if device.imei %}<li>IMEI: {{ device.imei }}</li>{% endif %}
+          {% if device.shared_with %}<li>Shared with: {{ device.shared_with | join(", ") }}</li>{% endif %}
+        </ul>
+      </details>
+    {% endif %}
+
+    <details class="device-alerts" title="Per-device alerting - separate from the Fresh/Stale chip above, and off by default until configured below">
+      <summary>Alerts
+        <span class="staleness-status">
+          {% set astat = device.alerts_status %}
+          {% if astat.enabled %}
+            {% if astat.muted %}
+              <span class="log-skipped" title="Tracking is on, but the stale alert and the recovery notice are both silenced">Muted</span>
+            {% elif not astat.has_data %}
+              <span class="log-skipped" title="This device has never reported a location, so there's nothing to compare against its threshold yet">No data yet</span>
+            {% elif astat.is_stale %}
+              <span class="log-error" title="Newest ping is {{ format_duration(astat.age_s) }} old - past the {{ format_duration(astat.threshold_s) }} alert threshold">Stale</span>
+            {% endif %}
           {% endif %}
-          {% if device.type_label %}<span>{{ device.type_label }}</span>{% endif %}
-        </div>
-        {% if device.manufacturer or device.model or device.carrier or device.codename or device.registered_at_str or device.imei or device.shared_with %}
-          <details class="device-details">
-            <summary>Details</summary>
-            <ul>
-              {% if device.manufacturer %}<li>Manufacturer: {{ device.manufacturer }}</li>{% endif %}
-              {% if device.model %}<li>Model: {{ device.model }}</li>{% endif %}
-              {% if device.carrier %}<li>Carrier: {{ device.carrier }}</li>{% endif %}
-              {% if device.codename %}<li>Codename: {{ device.codename }}</li>{% endif %}
-              {% if device.registered_at_str %}<li>Registered: {{ device.registered_at_str }}</li>{% endif %}
-              {% if device.imei %}<li>IMEI: {{ device.imei }}</li>{% endif %}
-              {% if device.shared_with %}<li>Shared with: {{ device.shared_with | join(", ") }}</li>{% endif %}
-            </ul>
-          </details>
-        {% endif %}
-      </td>
-      <td class="actions-cell">
-        <button type="button" class="btn-icon" title="Locate"
-                hx-post="/devices/{{ device.canonic_id }}/locate?name={{ device.name | urlencode }}"
-                hx-target="#locate-result-{{ loop.index }}" hx-swap="innerHTML"
-                hx-indicator="#action-spinner-{{ device.canonic_id }}">📍</button>
-        <button type="button" class="btn-icon" title="Play sound"
-                hx-post="/devices/{{ device.canonic_id }}/sound/start"
-                hx-target="#sound-status-{{ device.canonic_id }}" hx-swap="innerHTML"
-                hx-indicator="#action-spinner-{{ device.canonic_id }}">🔊</button>
-        <button type="button" class="btn-icon" title="Stop sound"
-                hx-post="/devices/{{ device.canonic_id }}/sound/stop"
-                hx-target="#sound-status-{{ device.canonic_id }}" hx-swap="innerHTML"
-                hx-indicator="#action-spinner-{{ device.canonic_id }}">🔇</button>
-        {# Shared by all three buttons above - htmx shows/hides this
-           automatically while any of their requests is in flight, via its
-           own "htmx-indicator" class (auto-injected opacity rules; see
-           base.html's htmx <script> tag). #}
-        <span id="action-spinner-{{ device.canonic_id }}" class="action-spinner htmx-indicator" aria-hidden="true"></span>
-        {# Only Play sound/Stop sound render into this - Locate already has
-           its own dedicated result cell (see _locate_cell.html) with real
-           location data, not just a pass/fail glyph. #}
-        <span id="sound-status-{{ device.canonic_id }}" class="action-status"></span>
-      </td>
-      <td id="locate-result-{{ loop.index }}">
-        {% set canonic_id = device.canonic_id %}
-        {% set name = device.name %}
-        {% set locations = device.last_locations %}
-        {% set fetched_at_str = device.last_fetched_at_str %}
-        {% include "devices/_locate_cell.html" %}
-      </td>
-      <td id="map-links-{{ device.canonic_id }}">
-        {% include "devices/_map_links_cell.html" %}
-      </td>
-      {# Phone-only (Spot/BLE tags never have this) - see
-         ProtoDecoders/decoder.py:get_last_seen. #}
-      <td>{{ device.last_seen_str or "-" }}</td>
-      <td>{{ device.endpoint_count }}</td>
-      {# Per-fetch metadata, not per-location - its own column (updated via
-         the same OOB swap as the Map column - see _locate_cell.html) rather
-         than a line inside the "Last locate result" cell, which used to
-         throw off that column's row-for-row alignment with Map's. #}
-      <td id="polled-at-{{ device.canonic_id }}">{{ device.last_fetched_at_str or "-" }}</td>
-      <td>
-        {{ device.next_poll_str or "Not scheduled" }}
-        · <a href="/settings#device-{{ device.canonic_id }}">Edit</a>
-        {% if device.next_poll_ts %}
-          <br><span class="next-poll-countdown" data-next-poll-ts="{{ device.next_poll_ts }}"></span>
-        {% endif %}
-      </td>
-    </tr>
-  {% else %}
-    <tr><td colspan="10">No devices found.</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
+          {# "Tracking off" now lives on the card header chip instead (see
+             above) - and nothing renders here for "enabled, unmuted, has
+             data, not stale" either, since that's just the header's
+             Fresh/Stale chip restated. The wrapper span stays regardless,
+             so static/app.js's live update always has somewhere to write a
+             later "Stale". #}
+        </span>
+      </summary>
+
+      <div class="device-card-meta">
+        <span title="The same fix timestamp the alert threshold is measured against">{{ device.alerts_last_fix_str or "-" }}</span>
+        {% if astat.last_fix_time %}<span class="staleness-ago" data-last-fix-ts="{{ astat.last_fix_time }}" title="{{ ping_time(astat.last_fix_time) }}"></span>{% endif %}
+      </div>
+
+      <form hx-post="/devices/{{ device.canonic_id }}/staleness" hx-target="#device-table" hx-swap="innerHTML">
+        <label class="checkbox-label">
+          <input type="checkbox" name="enabled" value="1" {% if device.alerts_cfg.enabled %}checked{% endif %}>
+          Alert when this device stops updating
+        </label>
+
+        <label>Alert threshold
+          {{ duration_field("threshold", device.alerts_cfg.threshold_s, false) }}
+        </label>
+        <p class="field-hint">Nothing fires until this is set - compares against the same fix timestamp shown in this device's "Last locate result" above.</p>
+
+        <label>Repeat while still stale
+          {{ duration_field("repeat", device.alerts_cfg.repeat_s, true) }}
+        </label>
+
+        <label>Alert message
+          <textarea name="message_template" rows="2" class="url-input">{{ device.alerts_cfg.message_template }}</textarea>
+        </label>
+
+        <label class="checkbox-label">
+          <input type="checkbox" name="muted" value="1" {% if device.alerts_cfg.muted %}checked{% endif %}>
+          Mute (tracking stays on, but nothing is sent - not the stale alert, not the recovery notice)
+        </label>
+
+        <button type="submit">Save</button>
+      </form>
+    </details>
+
+    <details class="device-details">
+      <summary title="This device's forwarding endpoints and poll schedule - see Edit to change them">Forwarding</summary>
+      <div class="device-card-meta">
+        <span title="How many forwarding endpoints are configured for this device - see Edit below">Endpoints: {{ device.endpoint_count }}</span>
+      </div>
+      <div class="device-card-meta">
+        <span>
+          <span title="When the poll scheduler will next check this device, based on its endpoints' cron schedules">{{ device.next_poll_str or "Not scheduled" }}</span>
+          · <a href="/settings#device-{{ device.canonic_id }}" title="Edit this device's forwarding endpoints and poll schedule"><svg class="icon icon-sm"><use href="#i-edit"/></svg>Edit</a>
+          {% if device.next_poll_ts %}
+            <span class="next-poll-countdown" data-next-poll-ts="{{ device.next_poll_ts }}"></span>
+          {% endif %}
+        </span>
+      </div>
+    </details>
+
+    <div class="device-card-meta">
+      <span title="The last time Google's Find Hub itself saw this device, independent of anything GFMT has polled">Seen by Find Hub: {{ device.last_seen_str or "-" }}</span>
+      <span id="polled-at-{{ device.canonic_id }}" title="The last time GFMT itself fetched this device's location, manually or on its poll schedule">Polled: {{ device.last_fetched_at_str or "-" }}</span>
+    </div>
+
+    <div class="device-card-actions">
+      <button type="button" class="btn-icon" title="Locate this device now"
+              hx-post="/devices/{{ device.canonic_id }}/locate?name={{ device.name | urlencode }}"
+              hx-target="#locate-result-{{ loop.index }}" hx-swap="innerHTML"
+              hx-indicator="#action-spinner-{{ device.canonic_id }}"><svg class="icon"><use href="#i-crosshair"/></svg></button>
+      <button type="button" class="btn-icon" title="Play a sound on this device"
+              hx-post="/devices/{{ device.canonic_id }}/sound/start"
+              hx-target="#sound-status-{{ device.canonic_id }}" hx-swap="innerHTML"
+              hx-indicator="#action-spinner-{{ device.canonic_id }}"><svg class="icon"><use href="#i-volume"/></svg></button>
+      <button type="button" class="btn-icon" title="Stop the sound"
+              hx-post="/devices/{{ device.canonic_id }}/sound/stop"
+              hx-target="#sound-status-{{ device.canonic_id }}" hx-swap="innerHTML"
+              hx-indicator="#action-spinner-{{ device.canonic_id }}"><svg class="icon"><use href="#i-mute"/></svg></button>
+      <span id="action-spinner-{{ device.canonic_id }}" class="action-spinner htmx-indicator" aria-hidden="true"></span>
+      <span id="sound-status-{{ device.canonic_id }}" class="action-status"></span>
+    </div>
+  </div>
+{% else %}
+  <p>No devices found.</p>
+{% endfor %}
 </div>
 <script>
   if (window.seedMapMarkers) {
@@ -119,5 +177,8 @@
   }
   if (window.startNextPollCountdowns) {
     window.startNextPollCountdowns();
+  }
+  if (window.startStalenessAgoTicker) {
+    window.startStalenessAgoTicker();
   }
 </script>

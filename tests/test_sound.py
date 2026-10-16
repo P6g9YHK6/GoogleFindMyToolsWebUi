@@ -6,7 +6,7 @@ def test_sound_start(client):
     resp = client.post(f"/devices/{FAKE_CANONIC_ID}/sound/start")
     assert resp.status_code == 200
     assert 'action-status--ok' in resp.text
-    assert '✓' in resp.text
+    assert 'i-check' in resp.text
 
 
 def test_sound_stop(client):

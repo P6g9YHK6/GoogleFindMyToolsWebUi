@@ -61,7 +61,6 @@ def stub_backend(monkeypatch):
     from webui.device_list_cache import device_list_cache
     from webui.forwarders import settings_service
     from webui.routers import auth, devices, locate, register, sound
-    from webui.routers import staleness as staleness_router
 
     # webui/device_list_cache.py's singleton is a real module-level global
     # like query_throttle above - without this, a value cached by one test
@@ -78,9 +77,9 @@ def stub_backend(monkeypatch):
         }]
 
     monkeypatch.setattr(devices, "is_logged_in", lambda: True)
-    # firmware/settings/logs/staleness route through auth_state.login_required
-    # now instead of each importing is_logged_in themselves, so one patch
-    # here covers all four.
+    # firmware/settings/logs route through auth_state.login_required now
+    # instead of each importing is_logged_in themselves, so one patch here
+    # covers all three.
     monkeypatch.setattr(auth_state, "is_logged_in", lambda: True)
     # webui/demo_mode.py's devices_placeholder_active() looks up the real
     # webui.auth_state.is_logged_in() (its own bound name - see that
@@ -95,13 +94,12 @@ def stub_backend(monkeypatch):
     # settings.py's own fetch-and-parse logic lives in settings_service.py
     # now (see webui/forwarders/settings_service.py) - patch there instead
     # of on the router module itself.
-    for mod in (devices, settings_service, staleness_router):
+    for mod in (devices, settings_service):
         monkeypatch.setattr(mod, "request_device_list", lambda: b"")
         monkeypatch.setattr(mod, "parse_device_list_protobuf", lambda hex: None)
-        # All three pages share one device_list_cache slot (see its own
-        # docstring), so all need to fetch the same shape from it even
-        # though settings_service.py/staleness.py only actually use
-        # name/canonic_id.
+        # Both pages share one device_list_cache slot (see its own
+        # docstring), so both need to fetch the same shape from it even
+        # though settings_service.py only actually uses name/canonic_id.
         monkeypatch.setattr(mod, "get_device_details", fake_get_device_details)
 
     monkeypatch.setattr(devices, "refresh_custom_trackers", lambda device_list: None)

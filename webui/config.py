@@ -18,10 +18,20 @@ GFMT_BROWSER_DOWNLOAD_TIMEOUT_S = int(os.environ.get("GFMT_BROWSER_DOWNLOAD_TIME
 # fires once it goes fully quiet (dead mirror, stuck dpkg lock).
 GFMT_BROWSER_APT_IDLE_TIMEOUT_S = int(os.environ.get("GFMT_BROWSER_APT_IDLE_TIMEOUT_S", "300"))
 DEFAULT_POLL_INTERVAL_S = int(os.environ.get("DEFAULT_POLL_INTERVAL_S", "300"))
-# How long a device-list fetch is cached before re-fetching - webui/device_list_cache.py.
-DEVICE_LIST_CACHE_TTL_S = float(os.environ.get("DEVICE_LIST_CACHE_TTL_S", "8"))
+# How long a device-list fetch is cached before re-fetching -
+# webui/device_list_cache.py. The Devices/Forwarding Settings pages both
+# read through this one shared slot, so a plain page load never re-queries
+# Google - 24h, same as the account's own device list rarely changing shape
+# minute to minute - and each of those pages' own "Refresh" button
+# (webui/routers/devices.py's /devices/refresh) bypasses it on demand.
+DEVICE_LIST_CACHE_TTL_S = float(os.environ.get("DEVICE_LIST_CACHE_TTL_S", str(24 * 3600)))
 LOCATE_CONCURRENCY = int(os.environ.get("LOCATE_CONCURRENCY", "5"))
 LOCATE_TIMEOUT_S = int(os.environ.get("LOCATE_TIMEOUT_S", "60"))
+# How often webui/staleness.py's sweep re-checks a device with no forwarding
+# endpoints configured - the only ones it still covers, since a device with
+# endpoints gets the same check inline on every one of scheduler.py's own
+# poll ticks instead (see staleness.py's module docstring).
+STALENESS_SWEEP_INTERVAL_S = int(os.environ.get("STALENESS_SWEEP_INTERVAL_S", "3600"))
 
 # Account-wide throttle for every blocking call to Google's backend - see
 # webui/deps.py's run_blocking. At most QUERY_THROTTLE_MAX requests per
@@ -115,11 +125,25 @@ GFMT_ESP_IDF_PROVISION_TIMEOUT_S = int(os.environ.get("GFMT_ESP_IDF_PROVISION_TI
 TLS_CERT_PATH = DATA_DIR / "tls_cert.pem"
 TLS_KEY_PATH = DATA_DIR / "tls_key.pem"
 
-# Baked in at image build time - docker/web/Dockerfile,
-# .github/workflows/docker-publish.yml. "dev" = local build, no --build-arg.
-GFMT_BUILD_SHA = os.environ.get("GFMT_BUILD_SHA", "dev")
-GFMT_BUILD_DATE = os.environ.get("GFMT_BUILD_DATE", "")
-GFMT_BUILD_BRANCH = os.environ.get("GFMT_BUILD_BRANCH", "")
+# Baked in at image build time - docker/web/Dockerfile writes these to
+# .build_info (not just an ENV - see that file's own comment on why), which
+# .github/workflows/docker-publish.yml's --build-arg values flow into. "dev"
+# = local build, no --build-arg, or a plain `python -m webui.serve` outside
+# Docker entirely (no .build_info file at all, falls back to the env vars
+# below, same as before this file existed).
+def _read_build_info() -> tuple[str, str, str]:
+    build_info_path = pathlib.Path(__file__).resolve().parent.parent / ".build_info"
+    try:
+        lines = build_info_path.read_text().splitlines()
+    except OSError:
+        lines = []
+    sha = lines[0] if len(lines) > 0 and lines[0] else os.environ.get("GFMT_BUILD_SHA", "dev")
+    date = lines[1] if len(lines) > 1 else os.environ.get("GFMT_BUILD_DATE", "")
+    branch = lines[2] if len(lines) > 2 else os.environ.get("GFMT_BUILD_BRANCH", "")
+    return sha, date, branch
+
+
+GFMT_BUILD_SHA, GFMT_BUILD_DATE, GFMT_BUILD_BRANCH = _read_build_info()
 
 APP_START_TIME = time.monotonic()
 

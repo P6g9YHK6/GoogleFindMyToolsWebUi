@@ -27,8 +27,8 @@ async def register_submit(
     model_name: str = Form(_DEFAULT_IDENTITY["model_name"]),
     image_url: str = Form(_DEFAULT_IDENTITY["image_url"]),
     # An unchecked checkbox isn't posted at all - Form(False) is what
-    # correctly resolves that absence to False (same pattern as
-    # webui/routers/auth.py's devices_page_most_recent_only).
+    # correctly resolves that absence to False (same pattern as keep_track
+    # just below).
     experimental_official_app_compat: bool = Form(False),
     # Same "unchecked checkbox posts nothing" story as the one above -
     # Form(False) has to stay the server-side default regardless of the

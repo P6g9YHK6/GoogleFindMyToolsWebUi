@@ -1,9 +1,18 @@
+{# Machine-readable mirror of the prose below, for provision.js's signin-btn
+   click handler - this fragment is what's always freshly re-rendered on
+   every status change (initial load, "Refresh status", "Clear credentials",
+   and provision.js's own post-sign-in fetch), so these flags can never go
+   stale the way attaching them to the button itself would. #}
+<span id="auth-status-flags" hidden
+      data-logged-in="{{ '1' if status.logged_in else '0' }}"
+      data-shared-key-ready="{{ '1' if status.shared_key_ready else '0' }}"></span>
+
 {% if status.cleanup_warning %}
-  <p class="form-error">⚠ {{ status.cleanup_warning }}</p>
+  <p class="form-error"><svg class="icon icon-sm"><use href="#i-alert"/></svg> {{ status.cleanup_warning }}</p>
 {% endif %}
 
 {% if status.logged_in %}
-  <p>Signed in{% if status.username %} as {{ status.username }}{% endif %}.</p>
+  <p>Signed in{% if status.username %} as <span class="blur-sensitive" tabindex="0" title="Hover or focus to reveal">{{ status.username }}</span>{% endif %}.</p>
   <p>
     End-to-end encryption (needed to locate devices):
     {% if status.shared_key_ready %}
@@ -21,11 +30,11 @@
   <p class="form-error">{{ clear_error }}</p>
 {% endif %}
 
-<details>
-  <summary>Diagnostic info</summary>
+<div class="diagnostic-info">
+  <p class="diagnostic-info-heading">Diagnostic info</p>
   <ul>
     {% for item in status.diagnostics %}
-      <li>{{ item.name }}: {% if item.present %}present{% else %}<em>missing</em>{% endif %}</li>
+      <li><span class="diagnostic-dot {{ 'diagnostic-dot--ok' if item.present else 'diagnostic-dot--missing' }}"></span>{{ item.name }}: {% if item.present %}present{% else %}<em>missing</em>{% endif %}</li>
     {% endfor %}
   </ul>
-</details>
+</div>

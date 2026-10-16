@@ -156,6 +156,27 @@ def test_sweep_skips_devices_not_opted_in(tmp_path, monkeypatch, caplog):
     assert caplog.records == []
 
 
+def test_sweep_skips_a_device_with_endpoints_even_if_stale(tmp_path, monkeypatch, caplog):
+    """A device with forwarding endpoints gets check_device() called inline
+    on every one of webui/scheduler.py's own poll ticks instead - sweep_once
+    must leave it alone, or the two would duplicate each other's work (and
+    duplicate alerts)."""
+    _use_tmp_stores(tmp_path, monkeypatch)
+    now = 1_700_000_000
+    config_store.set_device_config(CANONIC_ID, {
+        "display_name": "", "google_name": "My Tag",
+        "endpoints": [{"method": "GET", "url": "http://x/", "cron": "*/5 * * * *"}],
+    })
+    cfg = {**staleness.default_staleness(), "enabled": True, "threshold_s": 3600}
+    latest_values_store.set_device_staleness(CANONIC_ID, cfg)
+    _set_fix(now, age_s=7200)
+
+    with caplog.at_level(logging.WARNING, logger="webui.staleness"):
+        staleness.sweep_once(now=now)
+    assert caplog.records == []
+    assert latest_values_store.get_device_staleness(CANONIC_ID)["alert_active"] is False
+
+
 # --- latest_values_store plumbing -----------------------------------------
 
 def test_device_staleness_round_trips(tmp_path, monkeypatch):
@@ -185,54 +206,3 @@ def test_prune_to_urls_preserves_staleness_state(tmp_path, monkeypatch):
 
     assert latest_values_store.get_endpoint_state(CANONIC_ID, "https://old.example") == {}
     assert latest_values_store.get_device_staleness(CANONIC_ID) == {"enabled": True, "threshold_s": 3600}
-
-
-# --- router -----------------------------------------------------------
-
-def test_staleness_page_loads(client):
-    resp = client.get("/staleness")
-    assert resp.status_code == 200
-    assert "Staleness" in resp.text
-
-
-def test_staleness_table_lists_the_account_device(client):
-    resp = client.get("/staleness/table")
-    assert resp.status_code == 200
-    assert "My Tracker" in resp.text
-    assert "Tracking off" in resp.text  # not opted in yet
-
-
-def test_save_device_staleness_via_form(client, tmp_path, monkeypatch):
-    _use_tmp_stores(tmp_path, monkeypatch)
-
-    from tests.conftest import FAKE_CANONIC_ID
-
-    resp = client.post(
-        f"/staleness/devices/{FAKE_CANONIC_ID}",
-        data={
-            "enabled": "1",
-            "threshold_preset": "86400",
-            "repeat_preset": "off",
-            "message_template": "Custom: {{device_name}}",
-            "muted": "0",
-        },
-    )
-    assert resp.status_code == 200
-
-    saved = latest_values_store.get_device_staleness(FAKE_CANONIC_ID)
-    assert saved["enabled"] is True
-    assert saved["threshold_s"] == 86400
-    assert saved["repeat_s"] is None
-    assert saved["message_template"] == "Custom: {{device_name}}"
-
-
-def test_save_device_staleness_accepts_a_custom_hours_value(client, tmp_path, monkeypatch):
-    _use_tmp_stores(tmp_path, monkeypatch)
-    from tests.conftest import FAKE_CANONIC_ID
-
-    resp = client.post(
-        f"/staleness/devices/{FAKE_CANONIC_ID}",
-        data={"enabled": "1", "threshold_preset": "", "threshold_custom_hours": "5", "repeat_preset": "off"},
-    )
-    assert resp.status_code == 200
-    assert latest_values_store.get_device_staleness(FAKE_CANONIC_ID)["threshold_s"] == 5 * 3600
