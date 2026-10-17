@@ -2008,6 +2008,22 @@ details ul {
   border-top: 1px solid var(--border);
 }
 
+.auth-banner:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--warning) var(--tint-border), var(--border));
+  padding: 0.6rem 1rem;
+}
+
+.auth-banner span {
+  flex: 1;
+}
+
 .unsaved-banner {
   font-size: 0.8rem;
   font-weight: 500;

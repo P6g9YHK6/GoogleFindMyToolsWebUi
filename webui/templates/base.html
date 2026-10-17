@@ -76,6 +76,27 @@
     </div>
   {% endmacro %}
 
+  {% if not http_auth_configured %}
+    <div class="auth-banner" id="auth-banner">
+      <svg class="icon"><use href="#i-alert"/></svg>
+      <span>No admin password is set - this web UI is unprotected. Set <code>HTTP_USER</code> and <code>HTTP_PASSWORD</code> to require sign-in.</span>
+      <button type="button" class="icon-btn" id="auth-banner-dismiss" aria-label="Dismiss">
+        <svg class="icon"><use href="#i-x"/></svg>
+      </button>
+    </div>
+    <script>
+      (function () {
+        // Hide immediately if already dismissed, before the rest of the
+        // page paints - same before-paint approach as the theme script above.
+        try {
+          if (localStorage.getItem("gfmt-auth-banner-dismissed") === "1") {
+            document.getElementById("auth-banner").hidden = true;
+          }
+        } catch (e) {}
+      })();
+    </script>
+  {% endif %}
+
   <div class="app-shell">
     <aside class="sidebar">
       <a href="/" class="side-brand"><img src="/static/logo.png" alt="GoogleFindMyToolsWebUi"><span>GFMT WebUi</span></a>
@@ -158,6 +179,15 @@
         else if (e.target.closest("#drawer-close")) closeDrawer();
         else if (e.target === backdrop) closeDrawer();
         else if (e.target.closest(".drawer nav a")) closeDrawer();
+      });
+
+      // Unprotected-webui banner dismiss - remembered per-browser so it
+      // doesn't come back on every page load/navigation once acknowledged.
+      document.addEventListener("click", function (e) {
+        if (!e.target.closest("#auth-banner-dismiss")) return;
+        try { localStorage.setItem("gfmt-auth-banner-dismissed", "1"); } catch (err) {}
+        var banner = document.getElementById("auth-banner");
+        if (banner) banner.hidden = true;
       });
 
       // Footer clock - the SERVER's time, not the viewer's own browser
