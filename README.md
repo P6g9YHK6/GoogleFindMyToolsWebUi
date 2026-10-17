@@ -26,9 +26,12 @@ It's built on top of [GoogleFindMyTools](https://github.com/leonboe1/GoogleFindM
 - **`/metrics`** - a small set of Prometheus-format gauges (uptime, sign-in status, query-throttle queue depth, forwarding/system log entry counts by outcome) if you already scrape other self-hosted services and want this one in the same dashboard. Behind the same Basic Auth as everything else when configured.
 
 ## Screenshots
-<img width="829" height="378" alt="Screenshot_20260810_183230" src="https://github.com/user-attachments/assets/c4024da1-076c-4587-8c98-96a086c3b413" />
-<img width="722" height="1139" alt="Screenshot_20260810_190013" src="https://github.com/user-attachments/assets/1ab6e075-e24c-4fc1-a3ce-7c2d1de7360f" />
-<img width="707" height="695" alt="Screenshot_20260810_184047" src="https://github.com/user-attachments/assets/4d4d161d-c61b-4d72-92a5-c081559604ea" />
+<img width="1867" height="942" alt="image" src="https://github.com/user-attachments/assets/2097fb72-b9d9-4cf1-8b3e-1d5c85042b9d" />
+<img width="1900" height="863" alt="image" src="https://github.com/user-attachments/assets/5ca7601c-cfd2-46ff-b4cd-dc261c04bcc3" />
+<img width="442" height="398" alt="image" src="https://github.com/user-attachments/assets/48df2813-d73b-4670-a315-aed7031f00b3" />
+<img width="1644" height="1280" alt="image" src="https://github.com/user-attachments/assets/f26fd1b3-a7bf-4c5b-8343-631a69918299" />
+<img width="1627" height="1288" alt="image" src="https://github.com/user-attachments/assets/f0fcd660-2170-4da7-ac13-f9aa4aafed3d" />
+
 
 ## Quick start
 
