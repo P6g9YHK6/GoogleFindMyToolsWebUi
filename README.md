@@ -29,7 +29,7 @@ It's built on top of [GoogleFindMyTools](https://github.com/leonboe1/GoogleFindM
 <img width="1867" height="942" alt="image" src="https://github.com/user-attachments/assets/2097fb72-b9d9-4cf1-8b3e-1d5c85042b9d" />
 <img width="1900" height="863" alt="image" src="https://github.com/user-attachments/assets/5ca7601c-cfd2-46ff-b4cd-dc261c04bcc3" />
 <img width="1644" height="1280" alt="image" src="https://github.com/user-attachments/assets/f26fd1b3-a7bf-4c5b-8343-631a69918299" />
-<img width="1627" height="1288" alt="image" src="https://github.com/user-attachments/assets/f0fcd660-2170-4da7-ac13-f9aa4aafed3d" />
+
 
 
 ## Quick start
