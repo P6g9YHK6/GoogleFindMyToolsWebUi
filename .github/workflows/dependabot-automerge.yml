@@ -1,0 +1,40 @@
+name: Dependabot auto-merge
+
+# Merges Dependabot PRs into dev once "Lint and test" passes on them. Runs off
+# workflow_run instead of pull_request because a pull_request run triggered by
+# Dependabot only gets a read-only token and can't merge anything.
+on:
+  workflow_run:
+    workflows: ["Lint and test"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]' &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Merge PR
+        run: |
+          pr=$(gh pr list --head '${{ github.event.workflow_run.head_branch }}' --base dev --state open --json number -q '.[0].number')
+          if [ -z "$pr" ]; then
+            echo "No open Dependabot PR into dev for this branch, nothing to do"
+            exit 0
+          fi
+          gh pr merge "$pr" --squash --delete-branch
+
+      # A merge done with GITHUB_TOKEN doesn't fire push workflows, so the dev
+      # image wouldn't get rebuilt on its own.
+      - name: Rebuild dev image
+        run: gh workflow run docker-publish.yml --ref dev

@@ -1,0 +1,44 @@
+version: 2
+
+# PRs go to dev (where work lands before being merged into main), grouped per
+# ecosystem so a week of bumps is one PR to review instead of a dozen.
+updates:
+  - package-ecosystem: pip
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+    groups:
+      webui-assets:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /docker/web
+    target-branch: dev
+    schedule:
+      interval: weekly
+    ignore:
+      # requirements.lock is compiled for 3.11 and Node only builds static
+      # assets, so Python 3.x and Node major bumps stay a deliberate manual change.
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

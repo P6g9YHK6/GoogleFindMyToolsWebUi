@@ -25,6 +25,42 @@ logger = logging.getLogger("webui.scheduler")
 
 _tasks: dict[str, asyncio.Task] = {}
 
+_LOCATE_RETRY_ATTEMPTS = 3
+_LOCATE_RETRY_DELAY_SECONDS = 2.0
+_LOCATE_ALERT_THRESHOLD = 3
+
+_consecutive_locate_failures: dict[str, int] = {}
+_last_locate_failure_reason: dict[str, str] = {}
+
+
+async def _locate_with_retries(canonic_id: str, name: str) -> list:
+    for _ in range(_LOCATE_RETRY_ATTEMPTS - 1):
+        try:
+            return await locate_device(canonic_id, name)
+        except Exception:
+            await asyncio.sleep(_LOCATE_RETRY_DELAY_SECONDS)
+    return await locate_device(canonic_id, name)
+
+
+def _record_locate_failure(canonic_id: str, name: str, error: Exception) -> None:
+    reason = str(error)
+    if _last_locate_failure_reason.get(canonic_id) == reason:
+        _consecutive_locate_failures[canonic_id] = _consecutive_locate_failures.get(canonic_id, 0) + 1
+    else:
+        _last_locate_failure_reason[canonic_id] = reason
+        _consecutive_locate_failures[canonic_id] = 1
+
+    count = _consecutive_locate_failures[canonic_id]
+    if count >= _LOCATE_ALERT_THRESHOLD:
+        logger.warning("Locate failed for %s: %s (%d in a row)", name, reason, count)
+    else:
+        logger.info("Locate failed for %s: %s (%d/%d before alerting)", name, reason, count, _LOCATE_ALERT_THRESHOLD)
+
+
+def _clear_locate_failure(canonic_id: str) -> None:
+    _consecutive_locate_failures.pop(canonic_id, None)
+    _last_locate_failure_reason.pop(canonic_id, None)
+
 
 def _merged_endpoint(canonic_id: str, endpoint_cfg: dict) -> tuple[str, dict]:
     """(url, endpoint config merged with its recorded runtime state) - see
@@ -113,10 +149,12 @@ async def _poll_device(canonic_id: str):
             locations = []
         else:
             try:
-                locations = await locate_device(canonic_id, name)
+                locations = await _locate_with_retries(canonic_id, name)
             except Exception as e:
                 locations = []
-                logger.warning("Locate failed for %s: %s", name, e)
+                _record_locate_failure(canonic_id, name, e)
+            else:
+                _clear_locate_failure(canonic_id)
 
         # Maps any SEMANTIC reading with a configured name to fixed
         # coordinates, once here, so storage and forwarding both see the

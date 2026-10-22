@@ -83,6 +83,9 @@ def _build_info(request: Request) -> dict:
         # firmware/page.html read to disable their own real-action buttons,
         # with no router needing to pass this along by hand.
         "demo_mode": demo_mode.is_demo_mode(),
+        # Mirrors BasicAuthMiddleware._enabled() exactly - drives the
+        # unprotected-webui banner in base.html.
+        "http_auth_configured": bool(config.HTTP_USER and config.HTTP_PASSWORD),
     }
 
 

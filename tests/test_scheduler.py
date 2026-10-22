@@ -4,6 +4,7 @@ dispatch, failure escalation) is covered separately in
 tests/test_forwarders_policy.py."""
 
 import asyncio
+import logging
 import time
 from datetime import datetime
 
@@ -39,6 +40,75 @@ def test_cron_preview_reports_invalid_expressions_without_raising():
 def test_cron_preview_default_count_is_three():
     preview = scheduler.cron_preview("*/5 * * * *", base=datetime(2026, 8, 6, 12, 0, 0))
     assert len(preview["runs_str"]) == 3
+
+
+async def test_locate_with_retries_succeeds_after_a_transient_failure(monkeypatch):
+    orig_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _secs: orig_sleep(0))
+    calls = {"n": 0}
+
+    async def flaky(canonic_id, name):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise RuntimeError("boom")
+        return ["ok"]
+
+    monkeypatch.setattr(scheduler, "locate_device", flaky)
+
+    assert await scheduler._locate_with_retries("d1", "Tag") == ["ok"]
+    assert calls["n"] == 2
+
+
+async def test_locate_with_retries_raises_last_error_once_attempts_are_exhausted(monkeypatch):
+    orig_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _secs: orig_sleep(0))
+
+    async def always_fails(canonic_id, name):
+        raise RuntimeError("still boom")
+
+    monkeypatch.setattr(scheduler, "locate_device", always_fails)
+
+    try:
+        await scheduler._locate_with_retries("d1", "Tag")
+        assert False, "expected RuntimeError"
+    except RuntimeError as e:
+        assert str(e) == "still boom"
+
+
+def test_record_locate_failure_only_warns_once_the_same_error_repeats(caplog):
+    scheduler._consecutive_locate_failures.clear()
+    scheduler._last_locate_failure_reason.clear()
+
+    with caplog.at_level(logging.INFO, logger="webui.scheduler"):
+        for _ in range(scheduler._LOCATE_ALERT_THRESHOLD - 1):
+            scheduler._record_locate_failure("d1", "Tag", RuntimeError("MAC check failed"))
+        assert not any(r.levelno >= logging.WARNING for r in caplog.records)
+
+        scheduler._record_locate_failure("d1", "Tag", RuntimeError("MAC check failed"))
+        assert any(r.levelno >= logging.WARNING for r in caplog.records)
+
+
+def test_record_locate_failure_resets_the_streak_when_the_error_changes(caplog):
+    scheduler._consecutive_locate_failures.clear()
+    scheduler._last_locate_failure_reason.clear()
+
+    with caplog.at_level(logging.INFO, logger="webui.scheduler"):
+        for _ in range(scheduler._LOCATE_ALERT_THRESHOLD - 1):
+            scheduler._record_locate_failure("d1", "Tag", RuntimeError("MAC check failed"))
+        caplog.clear()
+        scheduler._record_locate_failure("d1", "Tag", RuntimeError("a different error"))
+        assert not any(r.levelno >= logging.WARNING for r in caplog.records)
+        assert scheduler._consecutive_locate_failures["d1"] == 1
+
+
+def test_clear_locate_failure_resets_state_for_the_device():
+    scheduler._consecutive_locate_failures["d1"] = 5
+    scheduler._last_locate_failure_reason["d1"] = "MAC check failed"
+
+    scheduler._clear_locate_failure("d1")
+
+    assert "d1" not in scheduler._consecutive_locate_failures
+    assert "d1" not in scheduler._last_locate_failure_reason
 
 
 def _traccar_endpoint(**overrides) -> dict:
