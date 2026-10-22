@@ -34,15 +34,12 @@ _last_locate_failure_reason: dict[str, str] = {}
 
 
 async def _locate_with_retries(canonic_id: str, name: str) -> list:
-    last_error: Exception | None = None
-    for attempt in range(_LOCATE_RETRY_ATTEMPTS):
+    for _ in range(_LOCATE_RETRY_ATTEMPTS - 1):
         try:
             return await locate_device(canonic_id, name)
-        except Exception as e:
-            last_error = e
-            if attempt < _LOCATE_RETRY_ATTEMPTS - 1:
-                await asyncio.sleep(_LOCATE_RETRY_DELAY_SECONDS)
-    raise last_error
+        except Exception:
+            await asyncio.sleep(_LOCATE_RETRY_DELAY_SECONDS)
+    return await locate_device(canonic_id, name)
 
 
 def _record_locate_failure(canonic_id: str, name: str, error: Exception) -> None:
