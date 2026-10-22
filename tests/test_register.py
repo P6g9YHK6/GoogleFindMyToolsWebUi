@@ -4,7 +4,7 @@ def test_register_form_redirects_to_firmware_page(client):
     resp = client.get("/register")
     assert resp.status_code == 200
     assert resp.request.url.path == "/firmware"
-    assert "Register Tracker" in resp.text
+    assert "Register a new tracker" in resp.text
 
 
 def test_register_submit(client):

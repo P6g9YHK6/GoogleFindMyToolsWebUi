@@ -2,192 +2,230 @@
 {% block title %}Firmware - GoogleFindMyToolsWebUi{% endblock %}
 {% block content %}
 <h1>Firmware</h1>
+<p class="page-lede">Turn an ESP32 or ESP32-C3 board into a tracker on Google's Find My Device network
+   in three steps: get a key, build the firmware, flash it over USB.</p>
 
-<h2>Register Tracker</h2>
-<p>Registers a new custom BLE tracker with your Google account and gives you an advertisement key (EID)
-   to use in the build form below, or when flashing manually following the instructions in
-   <code>ESP32Firmware/</code> or <code>ZephyrFirmware/</code>.</p>
-<form class="form-card" hx-post="/register" hx-target="#result" hx-swap="innerHTML">
-  <details id="register-identity">
-    <summary>Customize identity (optional)</summary>
+{# Step 1 - the key. Both tabs end up writing the same #eid_hex input (which
+   belongs to the build form below via its form= attribute), so step 2 never
+   has to care which way the key was obtained. #}
+<section class="fw-step" id="fw-step-key">
+  <header class="fw-step-head">
+    <span class="fw-step-num"><span>1</span><svg class="icon"><use href="#i-check"/></svg></span>
+    <div>
+      <h2>Tracker key</h2>
+      <p class="fw-step-sub">Every tracker needs its own advertisement key (EID) registered with your
+         Google account.</p>
+    </div>
+  </header>
 
-    <label for="identity_preset">Preset</label>
-    <select id="identity_preset" class="preset-select">
-      <option value="">Custom (fill in manually)</option>
-      {% for key, preset in identity_presets.items() %}
-      <option value="{{ key }}">{{ preset.label }}</option>
-      {% endfor %}
-    </select>
-    <p class="field-hint" id="identity-preset-hint"></p>
-
-    <label for="display_name">Display name</label>
-    <input id="display_name" name="display_name" type="text" maxlength="40"
-           value="{{ last_identity.display_name }}" required>
-
-    <label for="device_type">Device type</label>
-    <select id="device_type" name="device_type">
-      {% for name, label in device_type_choices %}
-      <option value="{{ name }}" {% if name == last_identity.device_type %}selected{% endif %}>{{ label }}</option>
-      {% endfor %}
-    </select>
-    <p class="field-hint">Controls the icon shown for this device in Google's Find My Device app.</p>
-
-    <label for="manufacturer_name">Manufacturer name</label>
-    <input id="manufacturer_name" name="manufacturer_name" type="text" maxlength="40"
-           value="{{ last_identity.manufacturer_name }}" required>
-
-    <label for="model_name">Model name</label>
-    <input id="model_name" name="model_name" type="text" maxlength="40"
-           value="{{ last_identity.model_name }}" required>
-
-    <label for="image_url">Image URL</label>
-    <input id="image_url" name="image_url" type="url" maxlength="2048"
-           value="{{ last_identity.image_url }}" required>
-    <p class="field-hint">Shown inside Google's Find My Device app - never fetched by this
-       server, so any well-formed http(s) URL is accepted.</p>
-
-    <label class="checkbox-label">
-      <input id="experimental_official_app_compat" name="experimental_official_app_compat" type="checkbox"
-             {% if last_identity.experimental_official_app_compat %}checked{% endif %}>
-      Experimental: attempt official Find My Device app compatibility
-    </label>
-    <p class="field-hint">Best-effort and unverified. Normally this project deliberately scrambles part
-       of the registration data so Google's official app can never read it. Checking this instead
-       encrypts that data the same way a real Android device's would be - but there's no way to confirm
-       from here whether the (closed-source) official app will actually show or locate this tracker as a
-       result. This project's own tooling can locate the tracker either way.</p>
-  </details>
-
-  <label class="checkbox-label">
-    <input id="keep_track" name="keep_track" type="checkbox" checked>
-    Keep track
-  </label>
-  <p class="field-hint">Saves this registration so its current status (still on your account, last
-     seen, and so on) can be checked below without digging through the full Devices page. Since
-     Google doesn't hand back anything linking a device to the EID that registered it, this is
-     matched by the identity above rather than a hard link (see the Tracked Registrations panel
-     below).</p>
-
-  <button type="submit">Register new tracker</button>
-</form>
-<div id="result"></div>
-
-<h2>Tracked Registrations</h2>
-<p>Trackers registered above with "Keep track" checked, and whether Google's account still has
-   each one.</p>
-<div id="tracked-registrations" hx-get="/firmware/tracked" hx-trigger="load">Loading&hellip;</div>
-
-<h2>ESP32 / ESP32-C3</h2>
-<p>Builds <code>ESP32Firmware/</code> with your tracker's advertisement key (EID) baked in, then lets you
-   flash it straight from this browser over USB. Register a tracker above first if you don't have an
-   EID yet - registering just now fills it in below automatically.</p>
-
-<form id="firmware-build-form" class="form-card">
-  <label for="board">Board</label>
-  <select id="board" name="board">
-    <option value="esp32">ESP32 (Dev Module / ESP32-CAM)</option>
-    <option value="esp32c3">ESP32-C3</option>
-  </select>
-
-  <label for="eid_hex">Advertisement key (EID)</label>
-  <input id="eid_hex" name="eid_hex" type="text" pattern="[0-9a-fA-F]{40}" maxlength="40"
-         placeholder="40 hex characters" list="registered-eids" required>
-  <datalist id="registered-eids">
-    {% for entry in registered %}
-    <option value="{{ entry.eid_hex }}">registered {{ entry.pair_date_str }}</option>
-    {% endfor %}
-  </datalist>
-
-  <details id="firmware-advanced">
-    <summary>Advanced</summary>
-
-    <label for="flash_preset">Preset</label>
-    <select id="flash_preset" class="preset-select">
-      <option value="">Custom (fill in manually)</option>
-      {% for key, preset in flash_presets.items() %}
-      <option value="{{ key }}">{{ preset.label }}</option>
-      {% endfor %}
-    </select>
-    <p class="field-hint" id="flash-preset-hint"></p>
-
-    <label for="device_name">Device name</label>
-    <input id="device_name" name="device_name" type="text" maxlength="20" value="GFMT Tracker" required>
-
-    <label for="adv_interval_ms">Advertising interval (ms)</label>
-    <input id="adv_interval_ms" name="adv_interval_ms" type="number" min="20" max="10240" value="20" required>
-    <p class="field-hint">20-10240ms. Lower is more discoverable but uses more power.</p>
-
-    <label for="tx_power_dbm">TX power (dBm, ESP32 only)</label>
-    <select id="tx_power_dbm" name="tx_power_dbm">
-      <option value="-12">-12</option>
-      <option value="-9">-9</option>
-      <option value="-6">-6</option>
-      <option value="-3">-3</option>
-      <option value="0">0</option>
-      <option value="3">3</option>
-      <option value="6">6</option>
-      <option value="9" selected>9 (default)</option>
-    </select>
-    <p class="field-hint">Ignored on ESP32-C3 for now - see ESP32Firmware/main/build_config.h.</p>
-
-    <label for="tracking_protection">Unwanted-tracking-protection mode</label>
-    <select id="tracking_protection" name="tracking_protection">
-      <option value="1" selected>Enabled (default)</option>
-      <option value="0">Disabled</option>
-    </select>
-    <p class="field-hint">Experimental: only changes the advertised flag - this firmware doesn't
-       implement the buzzer/motion-alert behavior either way.</p>
-  </details>
-
-  {% if demo_mode %}
-  <p class="field-hint">Firmware builds are disabled on this demo instance - clone the repo to build locally.</p>
-  {% else %}
-  <p class="field-hint">First build on a fresh server downloads and installs the ESP-IDF toolchain
-     (~1-2GB) - can take several minutes. Later builds skip straight to the normal build steps.</p>
-  {% endif %}
-  <button id="build-btn" type="submit" {% if demo_mode %}disabled title="Disabled on this demo instance"{% endif %}>Build firmware</button>
-</form>
-
-<div id="firmware-build-panel" hidden>
-  <div id="firmware-bar-track"><div id="firmware-bar-fill"></div></div>
-  <p id="firmware-message"></p>
-  <ul id="firmware-log"></ul>
-</div>
-
-<div id="firmware-result">
-  <a id="firmware-download-link" href="/firmware/build/download" hidden>Download .bin</a>
-  <button id="flash-btn" type="button" hidden disabled>Flash via WebSerial</button>
-  <p id="firmware-flash-note"></p>
-</div>
-
-<div id="device-console-panel">
-  <h3>Device Console</h3>
-  <p class="field-hint">Reboots the connected board and shows its live serial output. Needs the same
-     browser/USB support as flashing above. Some boards don't wire DTR/RTS to reset/boot pins - if a
-     reboot button doesn't do anything, power-cycle the board manually instead.</p>
-  <div id="device-console-controls">
-    <button id="connect-console-btn" type="button" class="btn-secondary" hidden disabled>
-      Connect
-    </button>
-    <button id="disconnect-console-btn" type="button" class="btn-secondary" hidden disabled>
-      Disconnect
-    </button>
-    <button id="reboot-bootloader-btn" type="button" class="btn-secondary" hidden disabled>
-      Reboot to Bootloader/Flash Mode
-    </button>
-    <button id="reboot-normal-btn" type="button" class="btn-secondary" hidden disabled>
-      Reboot to Normal Mode
-    </button>
+  <div class="segmented" role="tablist" aria-label="Key source">
+    <button type="button" role="tab" id="key-tab-new" aria-controls="key-pane-new"
+            aria-selected="{{ 'false' if registered else 'true' }}">Register a new tracker</button>
+    <button type="button" role="tab" id="key-tab-existing" aria-controls="key-pane-existing"
+            aria-selected="{{ 'true' if registered else 'false' }}">Use an existing key</button>
   </div>
-  <p id="device-console-note"></p>
-  <pre id="device-console-log" class="preview-block">No device connected yet - use Connect, Flash, or one of the reboot buttons above.</pre>
-</div>
 
-<h2>Other Zephyr-supported boards</h2>
-<p>Nordic nRF5x, Silicon EFR32BG22, ST BlueNRG-LP, Quectel BC68-GV, TTGO T-BEAM, and other Zephyr-supported
-   boards aren't built or flashed from this page - flashing those typically needs board-specific tools
-   (J-Link, UF2, <code>west flash</code>). See <a href="/firmware/zephyr-readme">ZephyrFirmware/README.md</a>
-   for build/flash instructions.</p>
+  <div id="key-pane-new" role="tabpanel" aria-labelledby="key-tab-new" {% if registered %}hidden{% endif %}>
+    <form id="register-form" hx-post="/register" hx-target="#result" hx-swap="innerHTML">
+      <p class="fw-label">What will it be attached to?</p>
+      <div class="tile-grid" id="identity-preset-tiles">
+        {% for key, preset in identity_presets.items() %}
+        <label class="tile"><input type="radio" name="identity_preset" value="{{ key }}"><span class="tile-title">{{ preset.label }}</span></label>
+        {% endfor %}
+        <label class="tile"><input type="radio" name="identity_preset" value="" checked><span class="tile-title">Custom</span></label>
+      </div>
+      <p class="field-hint fw-preset-hint" id="identity-preset-hint"></p>
+
+      <label for="display_name">Name shown in Find My Device</label>
+      <input id="display_name" name="display_name" type="text" maxlength="40"
+             value="{{ last_identity.display_name }}" required>
+
+      <details id="register-identity">
+        <summary>More identity options</summary>
+
+        <label for="device_type">Icon</label>
+        <select id="device_type" name="device_type">
+          {% for name, label in device_type_choices %}
+          <option value="{{ name }}" {% if name == last_identity.device_type %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="manufacturer_name">Manufacturer name</label>
+        <input id="manufacturer_name" name="manufacturer_name" type="text" maxlength="40"
+               value="{{ last_identity.manufacturer_name }}" required>
+
+        <label for="model_name">Model name</label>
+        <input id="model_name" name="model_name" type="text" maxlength="40"
+               value="{{ last_identity.model_name }}" required>
+
+        <label for="image_url">Image URL</label>
+        <input id="image_url" name="image_url" type="url" maxlength="2048"
+               value="{{ last_identity.image_url }}" required>
+        <p class="field-hint">Shown in Google's Find My Device app. Never fetched by this server.</p>
+
+        <label class="checkbox-label">
+          <input id="experimental_official_app_compat" name="experimental_official_app_compat" type="checkbox"
+                 {% if last_identity.experimental_official_app_compat %}checked{% endif %}>
+          Experimental: try to make it visible in the official Find My Device app
+        </label>
+        <p class="field-hint">Unverified. By default part of the registration is deliberately scrambled so
+           the official app can't read it; this encrypts it like a real Android device would instead.
+           This project can locate the tracker either way.</p>
+      </details>
+
+      <label class="checkbox-label">
+        <input id="keep_track" name="keep_track" type="checkbox" checked>
+        List it under "Your trackers" below
+      </label>
+
+      <button type="submit">Register tracker</button>
+    </form>
+    <div id="result"></div>
+  </div>
+
+  <div id="key-pane-existing" role="tabpanel" aria-labelledby="key-tab-existing" {% if not registered %}hidden{% endif %}>
+    <label for="eid_pick">Previously registered</label>
+    <select id="eid_pick">
+      <option value="">{% if registered %}Pick one...{% else %}None registered on this server yet{% endif %}</option>
+      {% for entry in registered %}
+      <option value="{{ entry.eid_hex }}">{{ entry.display_name or "Tracker" }} &middot; {{ entry.pair_date_str }} &middot; {{ entry.eid_hex[:8] }}&hellip;</option>
+      {% endfor %}
+    </select>
+
+    <label for="eid_hex">Advertisement key (EID)</label>
+    <input id="eid_hex" name="eid_hex" form="firmware-build-form" type="text" maxlength="40"
+           placeholder="40 hex characters" autocomplete="off" spellcheck="false">
+    <p class="field-hint">Or paste one registered elsewhere.</p>
+  </div>
+
+  <p class="fw-key-summary" id="key-summary" aria-live="polite"></p>
+</section>
+
+{# Step 2 - build. #}
+<section class="fw-step" id="fw-step-build">
+  <header class="fw-step-head">
+    <span class="fw-step-num"><span>2</span><svg class="icon"><use href="#i-check"/></svg></span>
+    <div>
+      <h2>Build firmware</h2>
+      <p class="fw-step-sub">Compiled on this server with your key baked in.</p>
+    </div>
+  </header>
+
+  <form id="firmware-build-form">
+    <p class="fw-label">Board</p>
+    <div class="tile-grid tile-grid--wide">
+      <label class="tile"><input type="radio" name="board" value="esp32" checked>
+        <span class="tile-title">ESP32</span><span class="tile-sub">Dev Module, ESP32-CAM</span></label>
+      <label class="tile"><input type="radio" name="board" value="esp32c3">
+        <span class="tile-title">ESP32-C3</span><span class="tile-sub">ESP32-C3 boards</span></label>
+    </div>
+
+    <p class="fw-label">Battery life vs. range</p>
+    <div class="tile-grid" id="flash-preset-tiles">
+      {% for key, preset in flash_presets.items() %}
+      <label class="tile"><input type="radio" name="flash_preset" value="{{ key }}"><span class="tile-title">{{ preset.label }}</span></label>
+      {% endfor %}
+      <label class="tile"><input type="radio" name="flash_preset" value="" checked><span class="tile-title">Custom</span></label>
+    </div>
+    <p class="field-hint fw-preset-hint" id="flash-preset-hint"></p>
+    <p class="fw-summary" id="flash-summary"></p>
+
+    <details id="firmware-advanced">
+      <summary>Fine-tune</summary>
+
+      <label for="device_name">Bluetooth device name</label>
+      <input id="device_name" name="device_name" type="text" maxlength="20" value="GFMT Tracker" required>
+
+      <label for="adv_interval_ms">Advertising interval (ms)</label>
+      <input id="adv_interval_ms" name="adv_interval_ms" type="number" min="20" max="10240" value="20" required>
+      <p class="field-hint">20 to 10240. Lower is found faster but drains the battery sooner.</p>
+
+      <label for="tx_power_dbm">TX power (dBm)</label>
+      <select id="tx_power_dbm" name="tx_power_dbm">
+        <option value="-12">-12</option>
+        <option value="-9">-9</option>
+        <option value="-6">-6</option>
+        <option value="-3">-3</option>
+        <option value="0">0</option>
+        <option value="3">3</option>
+        <option value="6">6</option>
+        <option value="9" selected>9 (default)</option>
+      </select>
+      <p class="field-hint">ESP32 only for now; ignored on ESP32-C3.</p>
+
+      <label for="tracking_protection">Unwanted-tracking protection flag</label>
+      <select id="tracking_protection" name="tracking_protection">
+        <option value="1" selected>Enabled (default)</option>
+        <option value="0">Disabled</option>
+      </select>
+      <p class="field-hint">Experimental: only changes the advertised flag. The firmware doesn't implement
+         the buzzer/motion alerts either way.</p>
+    </details>
+
+    <div class="fw-actions">
+      <button id="build-btn" type="submit" {% if demo_mode %}disabled title="Disabled on this demo instance"{% endif %}>Build firmware</button>
+      <span class="field-hint" id="build-note">
+        {% if demo_mode %}Builds are disabled on this demo instance.{% else %}The first build installs the
+        ESP-IDF toolchain (1-2GB) and can take several minutes.{% endif %}
+      </span>
+    </div>
+  </form>
+
+  <div id="firmware-build-panel" class="fw-progress" hidden>
+    <div class="progress-track"><div class="progress-fill" id="firmware-bar-fill"></div></div>
+    <p id="firmware-message"></p>
+    <details class="fw-log-details">
+      <summary>Build steps</summary>
+      <ul id="firmware-log"></ul>
+    </details>
+  </div>
+</section>
+
+{# Step 3 - flash. #}
+<section class="fw-step" id="fw-step-flash">
+  <header class="fw-step-head">
+    <span class="fw-step-num"><span>3</span><svg class="icon"><use href="#i-check"/></svg></span>
+    <div>
+      <h2>Flash it</h2>
+      <p class="fw-step-sub">Plug the board in over USB and write the firmware straight from this browser.</p>
+    </div>
+  </header>
+
+  <p class="fw-locked" id="flash-locked">Build the firmware in step 2 first.</p>
+
+  <div id="firmware-result" hidden>
+    <div class="fw-actions">
+      <button id="flash-btn" type="button" hidden disabled>Flash over USB</button>
+      <a id="firmware-download-link" class="btn-link" href="/firmware/build/download">Download .bin</a>
+    </div>
+    <div class="progress-track" id="flash-bar-track" hidden><div class="progress-fill" id="flash-bar-fill"></div></div>
+    <p id="firmware-flash-note" class="fw-note"></p>
+  </div>
+
+  <details id="device-console-panel">
+    <summary>Serial console and reboot tools</summary>
+    <p class="field-hint">Shows the board's live serial output. Some boards don't wire DTR/RTS to the
+       reset/boot pins; if a reboot button does nothing, unplug and replug the board instead.</p>
+    <div id="device-console-controls">
+      <button id="connect-console-btn" type="button" class="btn-secondary" hidden disabled>Connect</button>
+      <button id="disconnect-console-btn" type="button" class="btn-secondary" hidden disabled>Disconnect</button>
+      <button id="reboot-bootloader-btn" type="button" class="btn-secondary" hidden disabled>Reboot to flash mode</button>
+      <button id="reboot-normal-btn" type="button" class="btn-secondary" hidden disabled>Reboot to normal mode</button>
+    </div>
+    <p id="device-console-note" class="fw-note"></p>
+    <pre id="device-console-log" class="preview-block">No device connected yet.</pre>
+  </details>
+</section>
+
+<h2>Your trackers</h2>
+<p>Trackers registered here with "List it under Your trackers" checked, and whether your Google account
+   still has each one.</p>
+<div id="tracked-registrations" hx-get="/firmware/tracked" hx-trigger="load, tracker-registered from:body">Loading&hellip;</div>
+
+<h2>Other boards</h2>
+<p>Nordic nRF5x, Silicon Labs EFR32BG22, ST BlueNRG-LP and other Zephyr-supported boards need board-specific
+   flashing tools (J-Link, UF2, <code>west flash</code>), so they aren't built here. Register a key in step 1,
+   then follow <a href="/firmware/zephyr-readme">ZephyrFirmware/README.md</a>.</p>
 
 <script type="application/json" id="firmware-build-settings-by-eid">{{ build_settings_by_eid | tojson }}</script>
 <script type="application/json" id="identity-presets-data">{{ identity_presets | tojson }}</script>

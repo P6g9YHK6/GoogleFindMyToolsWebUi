@@ -1,7 +1,7 @@
 {# Rendered by webui/routers/firmware.py's firmware_tracked()/firmware_untrack() -
-   see the "Tracked Registrations" section in firmware/page.html, which loads
-   this on page view via hx-trigger="load" (same pattern as
-   devices/_table.html) and re-loads it after "Stop tracking" below. #}
+   see the "Your trackers" section in firmware/page.html, which loads this on
+   page view via hx-trigger="load" (same pattern as devices/_table.html),
+   again after each registration, and after "Stop tracking" below. #}
 {% if tracked %}
 <div class="table-scroll">
 <table>
@@ -23,10 +23,10 @@
       <td>{{ entry.pair_date_str }}</td>
       <td>
         {% if entry.status == "found" %}
-          Found on your account
+          <span class="diagnostic-dot diagnostic-dot--ok"></span>Found on your account
           <br><span class="field-hint">canonic id {{ entry.device.canonic_id }}</span>
         {% elif entry.status == "not_found" %}
-          Not found, possibly deleted from your Google account
+          <span class="diagnostic-dot diagnostic-dot--missing"></span>Not found, possibly deleted from your Google account
         {% else %}
           {{ entry.devices | length }} devices match this identity
           <details>
@@ -63,6 +63,5 @@
 </table>
 </div>
 {% else %}
-<p class="field-hint">No tracked registrations yet, register a tracker above with "Keep
-   track" checked to see it here.</p>
+<p class="field-hint">Nothing here yet. Trackers you register in step 1 show up here.</p>
 {% endif %}

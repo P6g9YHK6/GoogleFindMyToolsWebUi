@@ -1,11 +1,16 @@
 {% if error %}
   <p class="form-error">{{ error }}</p>
 {% elif result %}
-  <p>Advertisement key (copy it now, it will not be shown again):</p>
-  <p><code id="new-eid-hex">{{ result.eid_hex }}</code></p>
-  {% if experimental_official_app_compat %}
-  <p class="field-hint">Registered with experimental official-app-compatibility mode. This project can
-     still locate this tracker regardless; whether the official Find My Device app can too is
-     unverified.</p>
-  {% endif %}
+  <div class="fw-success">
+    <p><svg class="icon"><use href="#i-check"/></svg> Registered. Your advertisement key:</p>
+    <div class="fw-key-row">
+      <code id="new-eid-hex">{{ result.eid_hex }}</code>
+      <button type="button" class="btn-secondary" data-copy-target="new-eid-hex">Copy</button>
+    </div>
+    <p class="field-hint">Already filled in for step 2.</p>
+    {% if experimental_official_app_compat %}
+    <p class="field-hint">Registered in experimental official-app mode. This project can locate it either
+       way; whether the official Find My Device app can is unverified.</p>
+    {% endif %}
+  </div>
 {% endif %}
