@@ -16,8 +16,10 @@ permissions:
 jobs:
   # Dependabot bumps requirements*.txt but doesn't know how to regenerate a
   # uv-compiled requirements.lock, so lock-freshness fails on every pip PR.
-  # Regenerate it here and rerun the tests on the new commit. A push made with
-  # GITHUB_TOKEN doesn't trigger workflows, hence the explicit dispatch.
+  # Regenerate it here, rerun the tests on the new commit and merge from this
+  # job. A push made with GITHUB_TOKEN doesn't trigger workflows, hence the
+  # explicit dispatch, and a run dispatched by GITHUB_TOKEN doesn't fire
+  # workflow_run either, so the merge job below would never see it.
   refresh-lock:
     runs-on: ubuntu-latest
     if: >-
@@ -56,18 +58,37 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "regenerate requirements.lock"
           git push origin "HEAD:$BRANCH"
+          sha=$(git rev-parse HEAD)
           gh workflow run test.yml --ref "$BRANCH"
+
+          run=""
+          for _ in $(seq 1 30); do
+            run=$(gh run list --workflow test.yml --branch "$BRANCH" --event workflow_dispatch \
+              --json databaseId,headSha -q ".[] | select(.headSha == \"$sha\") | .databaseId" | head -n1)
+            [ -n "$run" ] && break
+            sleep 10
+          done
+          if [ -z "$run" ]; then
+            echo "::error::Dispatched test run never showed up"
+            exit 1
+          fi
+          gh run watch "$run" --exit-status
+
+          pr=$(gh pr list --head "$BRANCH" --base dev --state open --json number -q '.[0].number')
+          if [ -z "$pr" ]; then
+            echo "No open Dependabot PR into dev for this branch, nothing to do"
+            exit 0
+          fi
+          gh pr merge "$pr" --squash --delete-branch
+          gh workflow run docker-publish.yml --ref dev
 
   merge:
     runs-on: ubuntu-latest
-    # workflow_dispatch covers the rerun refresh-lock kicks off above.
     if: >-
+      github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.conclusion == 'success' &&
-      startsWith(github.event.workflow_run.head_branch, 'dependabot/') &&
-      ((github.event.workflow_run.event == 'pull_request' &&
-        github.event.workflow_run.actor.login == 'dependabot[bot]') ||
-       (github.event.workflow_run.event == 'workflow_dispatch' &&
-        github.event.workflow_run.actor.login == 'github-actions[bot]'))
+      github.event.workflow_run.actor.login == 'dependabot[bot]' &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/')
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
