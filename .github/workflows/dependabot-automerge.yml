@@ -14,13 +14,60 @@ permissions:
   actions: write
 
 jobs:
-  merge:
+  # Dependabot bumps requirements*.txt but doesn't know how to regenerate a
+  # uv-compiled requirements.lock, so lock-freshness fails on every pip PR.
+  # Regenerate it here and rerun the tests on the new commit. A push made with
+  # GITHUB_TOKEN doesn't trigger workflows, hence the explicit dispatch.
+  refresh-lock:
     runs-on: ubuntu-latest
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.conclusion == 'failure' &&
       github.event.workflow_run.actor.login == 'dependabot[bot]' &&
-      startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/pip/')
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BRANCH: ${{ github.event.workflow_run.head_branch }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Regenerate lock file
+        run: |
+          ~/.local/bin/uv pip compile \
+            requirements.txt requirements-web.txt \
+            -o requirements.lock \
+            --python-version 3.11 \
+            --generate-hashes
+
+      - name: Commit and retest
+        run: |
+          if git diff --quiet requirements.lock; then
+            echo "Lock already up to date, the failure is something else"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "regenerate requirements.lock"
+          git push origin "HEAD:$BRANCH"
+          gh workflow run test.yml --ref "$BRANCH"
+
+  merge:
+    runs-on: ubuntu-latest
+    # workflow_dispatch covers the rerun refresh-lock kicks off above.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/') &&
+      ((github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.actor.login == 'dependabot[bot]') ||
+       (github.event.workflow_run.event == 'workflow_dispatch' &&
+        github.event.workflow_run.actor.login == 'github-actions[bot]'))
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
