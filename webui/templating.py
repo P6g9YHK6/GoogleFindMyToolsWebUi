@@ -26,7 +26,7 @@ def _format_uptime(seconds: float) -> str:
 
 
 def _format_build_date(raw: str) -> str:
-    """"14:32 · 04 Oct 2026" from the UTC timestamp CI stamps into
+    """"04 Oct, 14:32" from the UTC timestamp CI stamps into
     .build_info (see config.py's _read_build_info) - converted to the
     server's own local time first, same as every other timestamp in the UI
     (ping_time, etc.), so it doesn't read as the odd one out just because
@@ -41,7 +41,7 @@ def _format_build_date(raw: str) -> str:
             dt = dt.astimezone()
     except ValueError:
         return raw
-    return dt.strftime("%H:%M · %d %b %Y")
+    return dt.strftime("%d %b, %H:%M")
 
 
 def _local_utc_offset_min() -> int:
@@ -50,6 +50,14 @@ def _local_utc_offset_min() -> int:
     actually None here; this just satisfies mypy without an assert."""
     offset = datetime.now().astimezone().utcoffset()
     return int(offset.total_seconds() // 60) if offset is not None else 0
+
+
+def _format_utc_offset(minutes: int) -> str:
+    """"UTC+02:00" - the footer clock's tooltip, so a wrong TZ env var is
+    spotted by its offset rather than by doing time math in your head."""
+    sign = "-" if minutes < 0 else "+"
+    hours, mins = divmod(abs(minutes), 60)
+    return f"UTC{sign}{hours:02d}:{mins:02d}"
 
 
 def _build_info(request: Request) -> dict:
@@ -69,9 +77,10 @@ def _build_info(request: Request) -> dict:
         # epoch plus the server's own UTC offset, not a local wall-clock
         # string) so it keeps reading as the *server's* clock even as it
         # drifts away from whatever moment this request rendered at.
-        "now_str": datetime.now().strftime("%H:%M:%S · %d %b %Y"),
+        "now_str": datetime.now().strftime("%d %b, %H:%M"),
         "now_ts": time.time(),
         "now_utc_offset_min": _local_utc_offset_min(),
+        "now_utc_offset_str": _format_utc_offset(_local_utc_offset_min()),
         # Small footer flag, not a banner - the one piece of UI chrome demo
         # mode adds anywhere (see base.html). Deliberately DEMO_MODE=1 only,
         # not devices_placeholder_active() too - that trigger is scoped to

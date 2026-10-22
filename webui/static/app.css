@@ -428,11 +428,40 @@ code {
   background: var(--primary);
 }
 
+/* Labelled build/uptime/clock rows: muted labels, monospace values. */
 .side-foot {
   font-size: 0.72rem;
   color: var(--text-muted);
-  font-family: var(--font-mono);
   padding: 0 0.4rem;
+}
+
+.side-foot-info {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.6rem;
+  margin: 0;
+}
+
+.side-foot-info dt {
+  font-weight: 500;
+}
+
+.side-foot-info dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  color: var(--text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.side-foot-links {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
 }
 
 /* Theme switch (Light/Dark/System - see the inline script in base.html's

@@ -103,17 +103,26 @@
       <nav>{{ nav_links() }}</nav>
       {{ theme_switch() }}
       <div class="side-foot">
-        {% if build_sha != "dev" %}
-          Build <a href="https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/commit/{{ build_sha }}" target="_blank" rel="noopener">{{ build_sha_short }}</a>
-        {% else %}
-          Build {{ build_sha_short }}
-        {% endif %}
-        {% if build_branch %} ({{ build_branch }}){% endif %}
-        {% if build_date %}<br>built {{ build_date }}{% endif %}
-        <br>up {{ uptime_str }}
-        <br><span id="footer-now" data-ts="{{ now_ts }}" data-offset-min="{{ now_utc_offset_min }}">{{ now_str }}</span>
-        {% if demo_mode %}<br><span class="demo-badge">Demo</span>{% endif %}
-        <br><a href="https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi" target="_blank" rel="noopener">Source</a>
+        <dl class="side-foot-info">
+          <dt>Version</dt>
+          <dd>
+            {%- if build_sha != "dev" -%}
+              <a href="https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/commit/{{ build_sha }}" target="_blank" rel="noopener">{{ build_sha_short }}</a>
+            {%- else -%}
+              {{ build_sha_short }}
+            {%- endif -%}
+            {% if build_branch %} &middot; {{ build_branch }}{% endif -%}
+          </dd>
+          {% if build_date %}<dt>Built</dt><dd>{{ build_date }}</dd>{% endif %}
+          <dt>Uptime</dt><dd>{{ uptime_str }}</dd>
+          <dt>Server time</dt>
+          <dd><span id="footer-now" data-ts="{{ now_ts }}" data-offset-min="{{ now_utc_offset_min }}"
+                    title="{{ now_utc_offset_str }}">{{ now_str }}</span></dd>
+        </dl>
+        <div class="side-foot-links">
+          <a href="https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi" target="_blank" rel="noopener">GitHub &#8599;</a>
+          {% if demo_mode %}<span class="demo-badge">Demo</span>{% endif %}
+        </div>
       </div>
     </aside>
 
@@ -210,8 +219,8 @@
         function tickClock() {
           var elapsed = Date.now() - clientMsAtLoad;
           var d = new Date(serverMsAtLoad + elapsed + offsetMs);
-          nowEl.textContent = pad(d.getUTCHours()) + ":" + pad(d.getUTCMinutes()) + ":" + pad(d.getUTCSeconds())
-            + " · " + pad(d.getUTCDate()) + " " + months[d.getUTCMonth()] + " " + d.getUTCFullYear();
+          nowEl.textContent = pad(d.getUTCDate()) + " " + months[d.getUTCMonth()] + ", "
+            + pad(d.getUTCHours()) + ":" + pad(d.getUTCMinutes());
         }
         setInterval(tickClock, 1000);
       }
