@@ -341,6 +341,15 @@ code {
   gap: 0;
 }
 
+/* Content column next to the sidebar. main's auto margins only leave a gap
+   once the window is wider than its max-width, so at medium widths it would
+   otherwise sit flush against the sidebar's border. */
+.app-main {
+  flex: 1;
+  min-width: 0;
+  padding-left: 1.5rem;
+}
+
 .icon {
   width: 18px;
   height: 18px;
@@ -2260,6 +2269,10 @@ table[data-table-id="logs"] tbody tr td:first-child {
 
   .app-shell {
     flex-direction: column;
+  }
+
+  .app-main {
+    padding-left: 0;
   }
 }
 
