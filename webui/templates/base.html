@@ -76,27 +76,6 @@
     </div>
   {% endmacro %}
 
-  {% if not http_auth_configured %}
-    <div class="auth-banner" id="auth-banner">
-      <svg class="icon"><use href="#i-alert"/></svg>
-      <span>No admin password is set - this web UI is unprotected. Set <code>HTTP_USER</code> and <code>HTTP_PASSWORD</code> to require sign-in.</span>
-      <button type="button" class="icon-btn" id="auth-banner-dismiss" aria-label="Dismiss">
-        <svg class="icon"><use href="#i-x"/></svg>
-      </button>
-    </div>
-    <script>
-      (function () {
-        // Hide immediately if already dismissed, before the rest of the
-        // page paints - same before-paint approach as the theme script above.
-        try {
-          if (localStorage.getItem("gfmt-auth-banner-dismissed") === "1") {
-            document.getElementById("auth-banner").hidden = true;
-          }
-        } catch (e) {}
-      })();
-    </script>
-  {% endif %}
-
   <div class="app-shell">
     <aside class="sidebar">
       <a href="/" class="side-brand"><img src="/static/logo.png" alt="GoogleFindMyToolsWebUi"><span>GFMT WebUi</span></a>
@@ -134,6 +113,29 @@
       </div>
 
       <main>
+        {# Inside the content column rather than above the whole shell, so the
+           full-height sticky sidebar starts at the top of the window instead of
+           being pushed down (and its footer off-screen) by this banner. #}
+        {% if not http_auth_configured %}
+          <div class="auth-banner" id="auth-banner">
+            <svg class="icon"><use href="#i-alert"/></svg>
+            <span>No admin password is set - this web UI is unprotected. Set <code>HTTP_USER</code> and <code>HTTP_PASSWORD</code> to require sign-in.</span>
+            <button type="button" class="icon-btn" id="auth-banner-dismiss" aria-label="Dismiss">
+              <svg class="icon"><use href="#i-x"/></svg>
+            </button>
+          </div>
+          <script>
+            (function () {
+              // Hide immediately if already dismissed, before the rest of the
+              // page paints - same before-paint approach as the theme script above.
+              try {
+                if (localStorage.getItem("gfmt-auth-banner-dismissed") === "1") {
+                  document.getElementById("auth-banner").hidden = true;
+                }
+              } catch (e) {}
+            })();
+          </script>
+        {% endif %}
         {% block content %}{% endblock %}
       </main>
     </div>

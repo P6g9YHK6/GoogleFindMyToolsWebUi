@@ -2333,8 +2333,10 @@ details ul {
   font-weight: 500;
   color: var(--warning);
   background: color-mix(in srgb, var(--warning) 12%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--warning) var(--tint-border), var(--border));
+  border: 1px solid color-mix(in srgb, var(--warning) var(--tint-border), var(--border));
+  border-radius: var(--radius);
   padding: 0.6rem 1rem;
+  margin-top: 1rem;
 }
 
 .auth-banner span {
