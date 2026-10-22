@@ -3,8 +3,8 @@
   "private": true,
   "description": "Build-time only: minifies webui/static/*.css|js and vendors htmx/Leaflet/fonts locally instead of a CDN. Never installed in the runtime image - see docker/web/Dockerfile's assets stage.",
   "devDependencies": {
-    "esbuild": "^0.24.0",
-    "htmx.org": "1.9.12",
+    "esbuild": "^0.28.2",
+    "htmx.org": "2.0.11",
     "leaflet": "1.9.4",
     "@fontsource/sora": "^5.1.0",
     "@fontsource/figtree": "^5.1.0",
