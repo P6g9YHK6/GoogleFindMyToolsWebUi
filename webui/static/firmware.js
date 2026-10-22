@@ -30,18 +30,35 @@ const ESP_USB_FILTERS = [
   { usbVendorId: 0x303a }, // Espressif's own vendor ID - native USB CDC/JTAG on ESP32-C3
 ];
 
+const EID_RE = /^[0-9a-fA-F]{40}$/;
+
+function readJson(id) {
+  try {
+    return JSON.parse(document.getElementById(id).textContent);
+  } catch (e) {
+    // Empty/malformed blob - whatever reads it just has nothing to fill in.
+    return {};
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const form = document.getElementById("firmware-build-form");
   if (!form) return;
 
   const buildBtn = document.getElementById("build-btn");
+  const buildNote = document.getElementById("build-note");
   const panel = document.getElementById("firmware-build-panel");
   const barFill = document.getElementById("firmware-bar-fill");
   const messageEl = document.getElementById("firmware-message");
   const logEl = document.getElementById("firmware-log");
+  const flashLocked = document.getElementById("flash-locked");
+  const firmwareResult = document.getElementById("firmware-result");
   const downloadLink = document.getElementById("firmware-download-link");
   const flashBtn = document.getElementById("flash-btn");
   const flashNote = document.getElementById("firmware-flash-note");
+  const flashBarTrack = document.getElementById("flash-bar-track");
+  const flashBarFill = document.getElementById("flash-bar-fill");
+  const consolePanel = document.getElementById("device-console-panel");
   const connectConsoleBtn = document.getElementById("connect-console-btn");
   const disconnectConsoleBtn = document.getElementById("disconnect-console-btn");
   const rebootBootloaderBtn = document.getElementById("reboot-bootloader-btn");
@@ -49,114 +66,243 @@ document.addEventListener("DOMContentLoaded", () => {
   const consoleNote = document.getElementById("device-console-note");
   const consoleLogEl = document.getElementById("device-console-log");
 
+  // Server-side disabled (demo mode) - stays disabled no matter what the
+  // key/build state below says.
+  const buildsDisabled = buildBtn.disabled;
+  const defaultBuildNote = buildNote.textContent.trim();
+  let buildRunning = false;
+
+  function markStepDone(stepId, done) {
+    document.getElementById(stepId).classList.toggle("is-done", done);
+  }
+
+  function checkTile(name, value) {
+    const input = document.querySelector(`input[name="${name}"][value="${value}"]`);
+    if (input) input.checked = true;
+  }
+
+  // ---- step 1: key ---------------------------------------------------------
+  // Both tabs feed the one #eid_hex input (part of the build form through its
+  // form= attribute), and everything downstream only ever reads that.
+  const keyTabs = {
+    new: [document.getElementById("key-tab-new"), document.getElementById("key-pane-new")],
+    existing: [document.getElementById("key-tab-existing"), document.getElementById("key-pane-existing")],
+  };
+  function showKeyPane(mode) {
+    for (const [name, [tab, pane]] of Object.entries(keyTabs)) {
+      tab.setAttribute("aria-selected", String(name === mode));
+      pane.hidden = name !== mode;
+    }
+  }
+  keyTabs.new[0].addEventListener("click", () => showKeyPane("new"));
+  keyTabs.existing[0].addEventListener("click", () => showKeyPane("existing"));
+
   const eidInput = document.getElementById("eid_hex");
+  const eidPick = document.getElementById("eid_pick");
+  const keySummary = document.getElementById("key-summary");
+
+  function knownKeyLabel(eid) {
+    const option = Array.from(eidPick.options).find((o) => o.value && o.value.toLowerCase() === eid.toLowerCase());
+    return option ? option.textContent.split(" · ")[0] : null;
+  }
+
+  // Re-derives everything that depends on having a valid key: the summary
+  // line under step 1, step 1's done mark, and whether Build is clickable.
+  function updateKeyState() {
+    const eid = eidInput.value.trim();
+    const valid = EID_RE.test(eid);
+    keySummary.classList.toggle("is-warning", Boolean(eid) && !valid);
+    keySummary.replaceChildren();
+    if (!eid) {
+      keySummary.textContent = "No key selected yet.";
+    } else if (!valid) {
+      keySummary.textContent = "That key doesn't look right: it should be exactly 40 hex characters (0-9, a-f).";
+    } else {
+      const name = knownKeyLabel(eid);
+      const code = document.createElement("code");
+      code.textContent = `${eid.slice(0, 10)}...`;
+      code.title = eid;
+      keySummary.append("Using key ", code, name ? ` (${name})` : "", " for the build below.");
+    }
+    markStepDone("fw-step-key", valid);
+    buildBtn.disabled = buildsDisabled || buildRunning || !valid;
+    buildNote.textContent = valid || buildsDisabled ? defaultBuildNote : "Choose a key in step 1 first.";
+  }
+
+  eidPick.addEventListener("change", () => {
+    if (!eidPick.value) return;
+    eidInput.value = eidPick.value;
+    applyKnownEidSettings();
+    updateKeyState();
+  });
+
+  eidInput.addEventListener("input", () => {
+    const eid = eidInput.value.trim().toLowerCase();
+    const match = Array.from(eidPick.options).find((o) => o.value && o.value.toLowerCase() === eid);
+    eidPick.value = match ? match.value : "";
+    applyKnownEidSettings();
+    updateKeyState();
+  });
+
+  // ---- step 1: identity presets (webui/registration_presets.py) ------------
+  // Purely a client-side convenience for filling in the identity fields -
+  // nothing about which preset (if any) was picked is used server-side.
+  const identityPresets = readJson("identity-presets-data");
+  const identityTiles = document.getElementById("identity-preset-tiles");
+  const identityPresetHint = document.getElementById("identity-preset-hint");
+  const identityDetails = document.getElementById("register-identity");
+  const identityFields = {
+    display_name: document.getElementById("display_name"),
+    device_type: document.getElementById("device_type"),
+    manufacturer_name: document.getElementById("manufacturer_name"),
+    model_name: document.getElementById("model_name"),
+    image_url: document.getElementById("image_url"),
+  };
+
+  // Highlights whichever preset the fields currently match exactly (e.g. the
+  // last identity this server registered with), falling back to Custom.
+  function syncIdentityTile() {
+    const match = Object.keys(identityPresets).find((key) =>
+      Object.entries(identityFields).every(([field, el]) => el.value === identityPresets[key][field]));
+    checkTile("identity_preset", match || "");
+    identityPresetHint.textContent = match ? identityPresets[match].hint : "";
+  }
+
+  identityTiles.addEventListener("change", (event) => {
+    const key = event.target.value;
+    const preset = identityPresets[key];
+    identityPresetHint.textContent = preset ? preset.hint : "";
+    if (!preset) {
+      identityDetails.open = true;
+      return;
+    }
+    for (const [field, el] of Object.entries(identityFields)) el.value = preset[field];
+    linkBuildToIdentity(key);
+  });
+  for (const el of Object.values(identityFields)) el.addEventListener("input", syncIdentityTile);
+
+  // A freshly registered key goes straight into step 2 instead of making the
+  // user copy-paste it, and the "Your trackers" list refreshes to include it.
+  document.body.addEventListener("htmx:afterSwap", (event) => {
+    if (event.target.id !== "result") return;
+    const newEid = document.getElementById("new-eid-hex");
+    if (!newEid) return;
+    const eid = newEid.textContent.trim();
+    if (!Array.from(eidPick.options).some((o) => o.value === eid)) {
+      const option = new Option(`${identityFields.display_name.value} · just now · ${eid.slice(0, 8)}...`, eid);
+      eidPick.add(option, 1);
+      eidPick.options[0].textContent = "Pick one...";
+    }
+    eidPick.value = eid;
+    eidInput.value = eid;
+    applyKnownEidSettings();
+    updateKeyState();
+    document.body.dispatchEvent(new Event("tracker-registered"));
+  });
+
+  document.body.addEventListener("click", async (event) => {
+    const btn = event.target.closest("[data-copy-target]");
+    if (!btn) return;
+    const text = document.getElementById(btn.dataset.copyTarget).textContent.trim();
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = "Copied";
+    } catch (e) {
+      // No clipboard access (plain-HTTP page) - select it for a manual copy.
+      const range = document.createRange();
+      range.selectNodeContents(document.getElementById(btn.dataset.copyTarget));
+      getSelection().removeAllRanges();
+      getSelection().addRange(range);
+      btn.textContent = "Press Ctrl+C";
+    }
+  });
+
+  // ---- step 2: build settings ------------------------------------------------
+  const flashPresets = readJson("flash-presets-data");
+  const buildSettingsByEid = readJson("firmware-build-settings-by-eid");
+  const flashTiles = document.getElementById("flash-preset-tiles");
+  const flashPresetHint = document.getElementById("flash-preset-hint");
+  const flashSummary = document.getElementById("flash-summary");
   const advancedDetails = document.getElementById("firmware-advanced");
   const deviceNameInput = document.getElementById("device_name");
   const advIntervalInput = document.getElementById("adv_interval_ms");
   const txPowerSelect = document.getElementById("tx_power_dbm");
   const trackingProtectionSelect = document.getElementById("tracking_protection");
-  let buildSettingsByEid = {};
-  try {
-    buildSettingsByEid = JSON.parse(
-      document.getElementById("firmware-build-settings-by-eid").textContent);
-  } catch (e) {
-    // Empty/malformed blob - Advanced section just keeps its defaults.
+
+  // Once the user has changed anything in step 2 themselves, nothing
+  // automatic (a known key's saved settings, or the step 1 preset) is
+  // allowed to overwrite it.
+  let buildTouchedByUser = false;
+  for (const type of ["input", "change"]) {
+    form.addEventListener(type, (event) => {
+      if (event.isTrusted && event.target !== eidInput) buildTouchedByUser = true;
+    });
   }
 
-  // Pre-fills the Advanced section from a previous build's settings for this
-  // EID (see webui/firmware_store.py), but only while the user hasn't opened
-  // it themselves - once they have, assume they're mid-edit and leave it alone.
-  let advancedTouchedByUser = false;
-  advancedDetails.addEventListener("toggle", () => {
-    if (advancedDetails.open) advancedTouchedByUser = true;
-  });
-
-  function applyKnownEidSettings() {
-    if (advancedTouchedByUser) return;
-    const settings = buildSettingsByEid[eidInput.value.trim().toLowerCase()]
-      || buildSettingsByEid[eidInput.value.trim()];
-    if (!settings) return;
+  function applyBuildSettings(settings) {
     deviceNameInput.value = settings.device_name;
     advIntervalInput.value = settings.adv_interval_ms;
     txPowerSelect.value = String(settings.tx_power_dbm);
     trackingProtectionSelect.value = settings.tracking_protection ? "1" : "0";
+    syncFlashTile();
   }
 
-  eidInput.addEventListener("input", applyKnownEidSettings);
-  eidInput.addEventListener("change", applyKnownEidSettings);
-  applyKnownEidSettings();
-
-  // ---- identity presets (webui/registration_presets.py) --------------------
-  // Fills in the "Customize identity" fields for a common build (keys, bag,
-  // bike, ...) so it's not a blank form by default - purely a client-side
-  // convenience, nothing about which preset (if any) was picked is submitted.
-  const identityPresetSelect = document.getElementById("identity_preset");
-  const identityPresetHint = document.getElementById("identity-preset-hint");
-  const displayNameInput = document.getElementById("display_name");
-  const deviceTypeSelect = document.getElementById("device_type");
-  const manufacturerInput = document.getElementById("manufacturer_name");
-  const modelNameInput = document.getElementById("model_name");
-  const imageUrlInput = document.getElementById("image_url");
-  let identityPresets = {};
-  try {
-    identityPresets = JSON.parse(document.getElementById("identity-presets-data").textContent);
-  } catch (e) {
-    // Empty/malformed blob - Preset dropdown just won't fill anything in.
+  // Same exact-match idea as syncIdentityTile(), plus a one-line plain
+  // English summary of what will actually be built, so "Custom" (or any
+  // preset) never hides the values behind the closed Fine-tune section.
+  function syncFlashTile() {
+    const current = {
+      device_name: deviceNameInput.value,
+      adv_interval_ms: Number(advIntervalInput.value),
+      tx_power_dbm: Number(txPowerSelect.value),
+      tracking_protection: trackingProtectionSelect.value === "1",
+    };
+    const match = Object.keys(flashPresets).find((key) =>
+      Object.entries(current).every(([field, value]) => flashPresets[key][field] === value));
+    checkTile("flash_preset", match || "");
+    flashPresetHint.textContent = match ? flashPresets[match].hint : "";
+    const board = form.elements.board.value;
+    const tx = board === "esp32c3" ? "default TX power (C3)" : `${current.tx_power_dbm} dBm`;
+    flashSummary.textContent = `"${current.device_name}", advertising every ${current.adv_interval_ms} ms ` +
+      `at ${tx}, tracking protection ${current.tracking_protection ? "on" : "off"}.`;
   }
 
-  if (identityPresetSelect) {
-    identityPresetSelect.addEventListener("change", () => {
-      const preset = identityPresets[identityPresetSelect.value];
-      identityPresetHint.textContent = preset ? preset.hint : "";
-      if (!preset) return;
-      displayNameInput.value = preset.display_name;
-      deviceTypeSelect.value = preset.device_type;
-      manufacturerInput.value = preset.manufacturer_name;
-      modelNameInput.value = preset.model_name;
-      imageUrlInput.value = preset.image_url;
-    });
-  }
-
-  // ---- flash presets (webui/flash_presets.py) ------------------------------
-  // Same idea as the identity presets above, but for the Advanced section's
-  // build settings (device name, advertising interval, TX power, tracking
-  // protection).
-  const flashPresetSelect = document.getElementById("flash_preset");
-  const flashPresetHint = document.getElementById("flash-preset-hint");
-  let flashPresets = {};
-  try {
-    flashPresets = JSON.parse(document.getElementById("flash-presets-data").textContent);
-  } catch (e) {
-    // Empty/malformed blob - Preset dropdown just won't fill anything in.
-  }
-
-  if (flashPresetSelect) {
-    flashPresetSelect.addEventListener("change", () => {
-      const preset = flashPresets[flashPresetSelect.value];
-      flashPresetHint.textContent = preset ? preset.hint : "";
-      if (!preset) return;
-      // A deliberately-picked preset should win over the known-EID autofill
-      // above, same as the user opening the section by hand would.
-      advancedTouchedByUser = true;
-      deviceNameInput.value = preset.device_name;
-      advIntervalInput.value = preset.adv_interval_ms;
-      txPowerSelect.value = String(preset.tx_power_dbm);
-      trackingProtectionSelect.value = preset.tracking_protection ? "1" : "0";
-    });
-  }
-
-  // Register Tracker and the build form are now one page (see
-  // webui/templates/firmware/_register_result.html) - carry a freshly
-  // registered EID straight into the build form instead of making the user
-  // copy-paste the one-time key shown above.
-  document.body.addEventListener("htmx:afterSwap", (event) => {
-    if (event.target.id !== "result") return;
-    const newEid = document.getElementById("new-eid-hex");
-    if (!newEid) return;
-    eidInput.value = newEid.textContent.trim();
-    applyKnownEidSettings();
+  flashTiles.addEventListener("change", (event) => {
+    const preset = flashPresets[event.target.value];
+    if (preset) applyBuildSettings(preset);
+    else advancedDetails.open = true;
   });
+  for (const el of [deviceNameInput, advIntervalInput, txPowerSelect, trackingProtectionSelect]) {
+    el.addEventListener("input", syncFlashTile);
+    el.addEventListener("change", syncFlashTile);
+  }
+  for (const radio of form.elements.board) radio.addEventListener("change", syncFlashTile);
 
+  // Picking a key this server built before restores the settings it was
+  // built with last time (see webui/firmware_store.py).
+  function applyKnownEidSettings() {
+    if (buildTouchedByUser) return;
+    const eid = eidInput.value.trim();
+    const settings = buildSettingsByEid[eid.toLowerCase()] || buildSettingsByEid[eid];
+    if (settings) applyBuildSettings(settings);
+  }
+
+  // Step 1's "what will it be attached to" also implies a sensible build:
+  // same-named tuning preset, and the matching board for the two bare-board
+  // presets.
+  function linkBuildToIdentity(key) {
+    if (buildTouchedByUser) return;
+    if (flashPresets[key]) applyBuildSettings(flashPresets[key]);
+    if (key === "esp32_devkit") checkTile("board", "esp32");
+    if (key === "esp32c3_devkit") checkTile("board", "esp32c3");
+    syncFlashTile();
+  }
+
+  syncIdentityTile();
+  syncFlashTile();
+  updateKeyState();
+
+  // ---- step 2: build progress ------------------------------------------------
   const ACTIVE_PHASES = ["provisioning", "cloning", "installing_toolchain", "preparing", "building", "merging"];
   // Backstops the websocket, same reasoning as provision.js: a dropped/
   // reconnecting socket or a throttled background tab must never leave the
@@ -201,7 +347,10 @@ document.addEventListener("DOMContentLoaded", () => {
     panel.hidden = false;
     barFill.style.width = `${msg.percent}%`;
     messageEl.textContent = msg.message;
-    buildBtn.disabled = ACTIVE_PHASES.includes(msg.phase);
+    messageEl.classList.toggle("form-error", msg.phase === "error");
+    panel.classList.toggle("is-error", msg.phase === "error");
+    buildRunning = ACTIVE_PHASES.includes(msg.phase);
+    updateKeyState();
 
     if (msg.phase !== lastPhase) {
       const li = document.createElement("li");
@@ -210,20 +359,25 @@ document.addEventListener("DOMContentLoaded", () => {
       lastPhase = msg.phase;
     }
 
-    if (ACTIVE_PHASES.includes(msg.phase)) {
+    if (buildRunning) {
       startPolling();
     } else {
       stopPolling();
     }
 
-    if (msg.phase === "done") {
+    const done = msg.phase === "done";
+    markStepDone("fw-step-build", done);
+    firmwareResult.hidden = !done;
+    flashLocked.hidden = done;
+    flashLocked.textContent = buildRunning
+      ? "Waiting for the build to finish..."
+      : "Build the firmware in step 2 first.";
+    if (done) {
       lastBuiltChip = msg.built_chip || null;
-      downloadLink.hidden = false;
       downloadLink.setAttribute("download", msg.download_name || "firmware.bin");
       updateFlashAvailability();
     } else {
-      downloadLink.hidden = true;
-      flashBtn.hidden = true;
+      markStepDone("fw-step-flash", false);
       flashNote.textContent = "";
     }
   }
@@ -246,6 +400,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (!form.checkValidity()) {
+      // The offending field is usually inside the closed Fine-tune section.
+      advancedDetails.open = true;
+      form.reportValidity();
+      return;
+    }
     logEl.innerHTML = "";
     lastPhase = null;
     ensureSocket();
@@ -255,8 +415,13 @@ document.addEventListener("DOMContentLoaded", () => {
       body: new FormData(form),
     });
     const data = await resp.json();
-    if (data.state) handleUpdate({ type: "firmware", ...data.state });
-    else if (data.error) messageEl.textContent = data.error;
+    if (data.state) {
+      handleUpdate({ type: "firmware", ...data.state });
+    } else if (data.error) {
+      panel.hidden = false;
+      messageEl.textContent = data.error;
+      messageEl.classList.add("form-error");
+    }
   });
 
   // Reflects an already-in-progress or just-finished build immediately on
@@ -443,7 +608,7 @@ document.addEventListener("DOMContentLoaded", () => {
       disconnectConsoleBtn.hidden = true;
       rebootBootloaderBtn.hidden = true;
       rebootNormalBtn.hidden = true;
-      consoleNote.textContent = "Live device console needs the same Web Serial support as flashing above.";
+      consoleNote.textContent = "The serial console needs the same browser support as flashing over USB.";
       return;
     }
     connectConsoleBtn.hidden = false;
@@ -470,21 +635,26 @@ document.addEventListener("DOMContentLoaded", () => {
   function updateFlashAvailability() {
     if (!navigator.serial) {
       flashBtn.hidden = true;
-      flashNote.textContent = "In-browser flashing needs a secure context (this page loaded over " +
-        "HTTPS, or from localhost) and a browser that supports the Web Serial API (Chrome, Edge, " +
-        "or Firefox 151+ - Firefox's support is new as of mid-2026, so it may not yet recognize " +
-        "every board's USB-serial chip the way Chrome does). " +
-        "Download the .bin above and flash it manually instead, e.g.: " +
-        "esptool.py --chip <board> write_flash 0x0 <file>.bin";
+      flashNote.textContent = "Flashing from the browser needs Chrome, Edge or Firefox 151+ and this " +
+        "page loaded over HTTPS or from localhost (Firefox's Web Serial support is new as of " +
+        "mid-2026 and may not recognize every board's USB chip yet). Download the .bin and flash " +
+        "it with esptool instead: esptool.py --chip <board> write_flash 0x0 <file>.bin";
       return;
     }
     flashBtn.hidden = false;
     flashBtn.disabled = false;
-    flashNote.textContent = "";
+    flashNote.textContent = "Plug the board in over USB, click Flash, then pick its port.";
+  }
+
+  function setFlashProgress(percent) {
+    flashBarTrack.hidden = percent === null;
+    flashBarFill.style.width = `${percent || 0}%`;
   }
 
   flashBtn.addEventListener("click", async () => {
     flashBtn.disabled = true;
+    markStepDone("fw-step-flash", false);
+    setFlashProgress(0);
     flashNote.textContent = "Requesting serial port...";
     let transport = null;
     let handedOffToConsole = false;
@@ -552,7 +722,9 @@ document.addEventListener("DOMContentLoaded", () => {
         // not optional here.
         compress: true,
         reportProgress: (_fileIndex, written, total) => {
-          flashNote.textContent = `Flashing... ${Math.round((written / total) * 100)}%`;
+          const percent = Math.round((written / total) * 100);
+          setFlashProgress(percent);
+          flashNote.textContent = `Flashing... ${percent}%`;
         },
       });
 
@@ -569,7 +741,11 @@ document.addEventListener("DOMContentLoaded", () => {
       handedOffToConsole = true;
       startMonitor();
       flashNote.textContent = "Flashed and rebooted. The device should now be advertising.";
+      markStepDone("fw-step-flash", true);
+      // Its boot log is streaming into the console now - worth seeing.
+      consolePanel.open = true;
     } catch (e) {
+      setFlashProgress(null);
       flashNote.textContent = `Flashing failed: ${e.message || e}`;
     } finally {
       if (transport && !handedOffToConsole) {

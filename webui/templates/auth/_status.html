@@ -36,5 +36,8 @@
     {% for item in status.diagnostics %}
       <li><span class="diagnostic-dot {{ 'diagnostic-dot--ok' if item.present else 'diagnostic-dot--missing' }}"></span>{{ item.name }}: {% if item.present %}present{% else %}<em>missing</em>{% endif %}</li>
     {% endfor %}
+    {# Polled on its own (see /auth/queue) - re-created along with the rest of
+       this fragment on every status swap, which restarts the poll cleanly. #}
+    <li id="queue-status" hx-get="/auth/queue" hx-trigger="load, every 2s" hx-swap="innerHTML"></li>
   </ul>
 </div>

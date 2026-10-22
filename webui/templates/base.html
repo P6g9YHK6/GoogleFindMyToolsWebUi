@@ -70,32 +70,11 @@
       <button type="button" data-theme-choice="dark" title="Dark">
         <svg class="icon"><use href="#i-moon"/></svg>{% if not compact %}Dark{% endif %}
       </button>
-      <button type="button" data-theme-choice="system" title="System">
-        <svg class="icon"><use href="#i-monitor"/></svg>{% if not compact %}System{% endif %}
+      <button type="button" data-theme-choice="system" title="Auto">
+        <svg class="icon"><use href="#i-monitor"/></svg>{% if not compact %}Auto{% endif %}
       </button>
     </div>
   {% endmacro %}
-
-  {% if not http_auth_configured %}
-    <div class="auth-banner" id="auth-banner">
-      <svg class="icon"><use href="#i-alert"/></svg>
-      <span>No admin password is set - this web UI is unprotected. Set <code>HTTP_USER</code> and <code>HTTP_PASSWORD</code> to require sign-in.</span>
-      <button type="button" class="icon-btn" id="auth-banner-dismiss" aria-label="Dismiss">
-        <svg class="icon"><use href="#i-x"/></svg>
-      </button>
-    </div>
-    <script>
-      (function () {
-        // Hide immediately if already dismissed, before the rest of the
-        // page paints - same before-paint approach as the theme script above.
-        try {
-          if (localStorage.getItem("gfmt-auth-banner-dismissed") === "1") {
-            document.getElementById("auth-banner").hidden = true;
-          }
-        } catch (e) {}
-      })();
-    </script>
-  {% endif %}
 
   <div class="app-shell">
     <aside class="sidebar">
@@ -103,21 +82,30 @@
       <nav>{{ nav_links() }}</nav>
       {{ theme_switch() }}
       <div class="side-foot">
-        {% if build_sha != "dev" %}
-          Build <a href="https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/commit/{{ build_sha }}" target="_blank" rel="noopener">{{ build_sha_short }}</a>
-        {% else %}
-          Build {{ build_sha_short }}
-        {% endif %}
-        {% if build_branch %} ({{ build_branch }}){% endif %}
-        {% if build_date %}<br>built {{ build_date }}{% endif %}
-        <br>up {{ uptime_str }}
-        <br><span id="footer-now" data-ts="{{ now_ts }}" data-offset-min="{{ now_utc_offset_min }}">{{ now_str }}</span>
-        {% if demo_mode %}<br><span class="demo-badge">Demo</span>{% endif %}
-        <br><a href="https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi" target="_blank" rel="noopener">Source</a>
+        <dl class="side-foot-info">
+          <dt>Version</dt>
+          <dd>
+            {%- if build_sha != "dev" -%}
+              <a href="https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/commit/{{ build_sha }}" target="_blank" rel="noopener">{{ build_sha_short }}</a>
+            {%- else -%}
+              {{ build_sha_short }}
+            {%- endif -%}
+            {% if build_branch %} &middot; {{ build_branch }}{% endif -%}
+          </dd>
+          {% if build_date %}<dt>Built</dt><dd>{{ build_date }}</dd>{% endif %}
+          <dt>Uptime</dt><dd>{{ uptime_str }}</dd>
+          <dt>Server time</dt>
+          <dd><span id="footer-now" data-ts="{{ now_ts }}" data-offset-min="{{ now_utc_offset_min }}"
+                    title="{{ now_utc_offset_str }}">{{ now_str }}</span></dd>
+        </dl>
+        <div class="side-foot-links">
+          <a href="https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi" target="_blank" rel="noopener">GitHub &#8599;</a>
+          {% if demo_mode %}<span class="demo-badge">Demo</span>{% endif %}
+        </div>
       </div>
     </aside>
 
-    <div style="flex:1; min-width:0;">
+    <div class="app-main">
       <div class="mobile-topbar">
         <button type="button" class="icon-btn hamburger" id="drawer-open" aria-label="Open menu"><svg class="icon"><use href="#i-menu"/></svg></button>
         <a href="/" class="side-brand"><img src="/static/logo.png" alt="" height="24"><span>GFMT WebUi</span></a>
@@ -125,6 +113,29 @@
       </div>
 
       <main>
+        {# Inside the content column rather than above the whole shell, so the
+           full-height sticky sidebar starts at the top of the window instead of
+           being pushed down (and its footer off-screen) by this banner. #}
+        {% if not http_auth_configured %}
+          <div class="auth-banner" id="auth-banner">
+            <svg class="icon"><use href="#i-alert"/></svg>
+            <span>No admin password is set - this web UI is unprotected. Set <code>HTTP_USER</code> and <code>HTTP_PASSWORD</code> to require sign-in.</span>
+            <button type="button" class="icon-btn" id="auth-banner-dismiss" aria-label="Dismiss">
+              <svg class="icon"><use href="#i-x"/></svg>
+            </button>
+          </div>
+          <script>
+            (function () {
+              // Hide immediately if already dismissed, before the rest of the
+              // page paints - same before-paint approach as the theme script above.
+              try {
+                if (localStorage.getItem("gfmt-auth-banner-dismissed") === "1") {
+                  document.getElementById("auth-banner").hidden = true;
+                }
+              } catch (e) {}
+            })();
+          </script>
+        {% endif %}
         {% block content %}{% endblock %}
       </main>
     </div>
@@ -210,8 +221,8 @@
         function tickClock() {
           var elapsed = Date.now() - clientMsAtLoad;
           var d = new Date(serverMsAtLoad + elapsed + offsetMs);
-          nowEl.textContent = pad(d.getUTCHours()) + ":" + pad(d.getUTCMinutes()) + ":" + pad(d.getUTCSeconds())
-            + " · " + pad(d.getUTCDate()) + " " + months[d.getUTCMonth()] + " " + d.getUTCFullYear();
+          nowEl.textContent = pad(d.getUTCDate()) + " " + months[d.getUTCMonth()] + ", "
+            + pad(d.getUTCHours()) + ":" + pad(d.getUTCMinutes());
         }
         setInterval(tickClock, 1000);
       }
