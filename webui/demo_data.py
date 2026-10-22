@@ -321,8 +321,8 @@ def fake_register_result(**_kwargs) -> dict:
     depend on what was submitted, same as a real registration's EID never
     depends on the identity fields either."""
     return {
-        "eid_hex": "de3a70d0" + "0" * 24 + "demo",
-        "advertisement_key": "de3a70d0" + "0" * 24 + "demo",
+        "eid_hex": "de3a70d0" + "0" * 28 + "beef",
+        "advertisement_key": "de3a70d0" + "0" * 28 + "beef",
         "pair_date": int(time.time()),
     }
 
