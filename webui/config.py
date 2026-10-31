@@ -32,6 +32,11 @@ LOCATE_TIMEOUT_S = int(os.environ.get("LOCATE_TIMEOUT_S", "60"))
 # endpoints gets the same check inline on every one of scheduler.py's own
 # poll ticks instead (see staleness.py's module docstring).
 STALENESS_SWEEP_INTERVAL_S = int(os.environ.get("STALENESS_SWEEP_INTERVAL_S", "3600"))
+# Experimental stand-in for the owner's Android phone uploading upcoming
+# tracker EIDs (see webui/eid_upload.py): "off", "dry-run" (log only) or "on".
+EID_UPLOAD = os.environ.get("EID_UPLOAD", "off").strip().lower()
+EID_UPLOAD_INTERVAL_S = int(os.environ.get("EID_UPLOAD_INTERVAL_S", str(12 * 3600)))
+EID_UPLOAD_DRIFT_SLOTS = int(os.environ.get("EID_UPLOAD_DRIFT_SLOTS", "2"))
 
 # Account-wide throttle for every blocking call to Google's backend - see
 # webui/deps.py's run_blocking. At most QUERY_THROTTLE_MAX requests per
