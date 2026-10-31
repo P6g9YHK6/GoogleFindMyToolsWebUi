@@ -34,7 +34,7 @@ LOCATE_TIMEOUT_S = int(os.environ.get("LOCATE_TIMEOUT_S", "60"))
 STALENESS_SWEEP_INTERVAL_S = int(os.environ.get("STALENESS_SWEEP_INTERVAL_S", "3600"))
 # Experimental stand-in for the owner's Android phone uploading upcoming
 # tracker EIDs (see webui/eid_upload.py): "off", "dry-run" (log only) or "on".
-EID_UPLOAD = os.environ.get("EID_UPLOAD", "off").strip().lower()
+EID_UPLOAD = os.environ.get("EID_UPLOAD", "on").strip().lower()
 EID_UPLOAD_INTERVAL_S = int(os.environ.get("EID_UPLOAD_INTERVAL_S", str(12 * 3600)))
 EID_UPLOAD_DRIFT_SLOTS = int(os.environ.get("EID_UPLOAD_DRIFT_SLOTS", "2"))
 

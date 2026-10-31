@@ -1,8 +1,8 @@
 """Periodic EID upload for regular FMDN trackers, standing in for the
 owner's Android phone (see SpotApi/UploadPrecomputedPublicKeyIds/
 upload_precomputed_public_key_ids.py's refresh_owned_trackers for what's
-uploaded and why). Off by default, set EID_UPLOAD=dry-run to only log what
-would be sent, or EID_UPLOAD=on to actually upload. Started from
+uploaded and why). On by default, set EID_UPLOAD=dry-run to only log what
+would be sent, or EID_UPLOAD=off to disable it. Started from
 webui/main.py's lifespan alongside the staleness sweep.
 
 Fetches the device list itself rather than going through
