@@ -190,3 +190,19 @@ def test_get_canonic_ids_ignores_the_richer_fields_get_device_details_adds():
     device_list.deviceMetadata.append(device)
 
     assert get_canonic_ids(device_list) == [("My Tag", "tag-1", None)]
+
+
+def test_custom_message_formatter_handles_repeated_messages():
+    # protobuf 7 removed FieldDescriptor.label, which this formatter used to
+    # tell repeated fields apart; this broke the debug export's text dumps.
+    from google.protobuf import text_format
+
+    from ProtoDecoders import DeviceUpdate_pb2
+    from ProtoDecoders.decoder import custom_message_formatter
+
+    device_list = DeviceUpdate_pb2.DevicesList()
+    device_list.deviceMetadata.add().userDefinedDeviceName = "Keys"
+    device_list.deviceMetadata.add().userDefinedDeviceName = "Bag"
+
+    text = text_format.MessageToString(device_list, message_formatter=custom_message_formatter)
+    assert text.count("deviceMetadata {") == 2
