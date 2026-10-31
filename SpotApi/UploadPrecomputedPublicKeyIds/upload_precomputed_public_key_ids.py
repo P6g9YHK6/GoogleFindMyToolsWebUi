@@ -9,6 +9,7 @@ from FMDNCrypto.eid_generator import ROTATION_PERIOD, generate_eid
 from ProtoDecoders.DeviceUpdate_pb2 import (
     IDENTIFIER_ANDROID,
     DevicesList,
+    DeviceUpdate,
     PublicKeyIdList,
     UploadPrecomputedPublicKeyIdsRequest,
 )
@@ -76,7 +77,8 @@ def get_next_eids(eik: bytes, pair_date: int, start_date: int, duration_seconds:
     return public_key_id_list
 
 
-def refresh_owned_trackers(device_list: DevicesList, drift_slots: int = 2, dry_run: bool = False) -> int:
+def refresh_owned_trackers(device_list: DevicesList, drift_slots: int = 2, dry_run: bool = False,
+                           clock_zeros: dict[str, int] | None = None) -> int:
     """Does for regular FMDN trackers (Chipolo, Pebblebee, ...) what the
     owner's Android phone normally does every few days: precompute their
     upcoming rotating EIDs and upload them, so Google can match crowdsourced
@@ -85,9 +87,12 @@ def refresh_owned_trackers(device_list: DevicesList, drift_slots: int = 2, dry_r
     tracker silently stops getting new reports.
 
     Experimental: the tracker's own clock can't be read without a BLE
-    connection, so it's assumed to have started at pairDate. drift_slots
-    extra rotation periods either side of that estimate are uploaded under
-    each timestamp to absorb clock drift. Phones and µC trackers are
+    connection. clock_zeros maps canonic id to the unix time that clock
+    read zero, as estimated by estimate_clock_zero below; trackers missing
+    from it fall back to pairDate, which is the same thing as of pairing
+    but can be hours off by now. drift_slots extra rotation periods either
+    side of that estimate are uploaded under each timestamp to absorb the
+    remaining error. Phones and µC trackers are
     skipped (phones upload their own, µC trackers are handled by
     refresh_custom_trackers above). Returns how many trackers were (or in
     dry_run, would have been) uploaded."""
@@ -110,17 +115,20 @@ def refresh_owned_trackers(device_list: DevicesList, drift_slots: int = 2, dry_r
             logger.warning("Skipping EID upload for %s, couldn't get its identity key: %s", name, e)
             continue
 
+        canonic_id = device.identifierInformation.canonicIds.canonicId[0].id
+        clock_zero = (clock_zeros or {}).get(canonic_id, registration.pairDate)
+
         new_truncated_ids = UploadPrecomputedPublicKeyIdsRequest.DevicePublicKeyIds()
         new_truncated_ids.pairDate = registration.pairDate
-        new_truncated_ids.canonicId.id = device.identifierInformation.canonicIds.canonicId[0].id
+        new_truncated_ids.canonicId.id = canonic_id
 
-        next_eids = get_rotating_eids(identity_key, registration.pairDate, start_date,
+        next_eids = get_rotating_eids(identity_key, clock_zero, start_date,
                                       duration_seconds=max_truncated_eid_seconds_server, drift_slots=drift_slots)
         new_truncated_ids.clientList.publicKeyIdInfo.extend(next_eids)
         request.deviceEids.append(new_truncated_ids)
 
-        logger.info("%s EIDs for %s (paired %s, %d entries, first %s)",
-                    "Would upload" if dry_run else "Uploading", name, registration.pairDate,
+        logger.info("%s EIDs for %s (clock zero pairDate%+ds, %d entries, first %s)",
+                    "Would upload" if dry_run else "Uploading", name, clock_zero - registration.pairDate,
                     len(next_eids), next_eids[0].publicKeyId.truncatedEid.hex() if next_eids else "-")
 
     if request.deviceEids and not dry_run:
@@ -129,18 +137,39 @@ def refresh_owned_trackers(device_list: DevicesList, drift_slots: int = 2, dry_r
     return len(request.deviceEids)
 
 
-def get_rotating_eids(eik: bytes, pair_date: int, start_date: int, duration_seconds: int,
+def estimate_clock_zero(device_update: DeviceUpdate) -> int | None:
+    """Unix time a tracker's clock read zero, from the location reports in a
+    LocateTracker response, or None without any. Each report carries the
+    tracker clock it was encrypted under (deviceTimeOffset, rounded down to
+    a rotation period) next to its own timestamp, which is never earlier
+    than the sighting, so timestamp - deviceTimeOffset is an upper bound on
+    clock zero that's at most one rotation period plus the reporting delay
+    too late. Takes the tightest bound and backs off half a period."""
+    reports = device_update.deviceMetadata.information.locationInformation.reports.recentLocationAndNetworkLocations
+    pairs = list(zip(reports.networkLocations, reports.networkLocationTimestamps))
+    if reports.HasField("recentLocation"):
+        pairs.append((reports.recentLocation, reports.recentLocationTimestamp))
+    bounds = [
+        timestamp.seconds - location.geoLocation.deviceTimeOffset
+        for location, timestamp in pairs
+        if location.geoLocation.deviceTimeOffset
+    ]
+    return min(bounds) - ROTATION_PERIOD // 2 if bounds else None
+
+
+def get_rotating_eids(eik: bytes, clock_zero: int, start_date: int, duration_seconds: int,
                       drift_slots: int = 0) -> list[PublicKeyIdList.PublicKeyIdInfo]:
     """Like get_next_eids, but for a tracker whose EID actually rotates:
     each entry's EID is derived from the tracker's own clock (seconds since
-    pairing, see FMDNCrypto/eid_generator.py) rather than a fixed static one.
+    clock_zero, see FMDNCrypto/eid_generator.py) rather than a fixed static
+    one.
     With drift_slots > 0, the EIDs of the neighbouring rotation periods are
     listed under the same timestamp as well."""
     duration_seconds = int(duration_seconds)
     public_key_id_list = []
     eid_cache: dict[int, bytes] = {}
 
-    start_offset = max(0, start_date - pair_date)
+    start_offset = max(0, start_date - clock_zero)
     current_time_offset = start_offset - (start_offset % ROTATION_PERIOD)
 
     while current_time_offset <= start_offset + duration_seconds:
@@ -152,7 +181,7 @@ def get_rotating_eids(eik: bytes, pair_date: int, start_date: int, duration_seco
                 eid_cache[beacon_offset] = generate_eid(eik, beacon_offset)[:10]
 
             info = PublicKeyIdList.PublicKeyIdInfo()
-            info.timestamp.seconds = pair_date + current_time_offset
+            info.timestamp.seconds = clock_zero + current_time_offset
             info.publicKeyId.truncatedEid = eid_cache[beacon_offset]
             public_key_id_list.append(info)
 

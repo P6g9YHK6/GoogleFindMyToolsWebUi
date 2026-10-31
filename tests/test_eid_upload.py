@@ -127,4 +127,87 @@ def test_upload_loop_unknown_mode_stays_off(monkeypatch, caplog):
 def test_upload_once_skips_when_logged_out(monkeypatch):
     monkeypatch.setattr(eid_upload, "is_logged_in", lambda: False)
     monkeypatch.setattr(eid_upload, "request_device_list", lambda: (_ for _ in ()).throw(AssertionError))
-    assert eid_upload.upload_once(dry_run=True) == 0
+    assert asyncio.run(eid_upload.upload_once(dry_run=True)) == 0
+
+
+# --- clock calibration --------------------------------------------------
+
+def _device_update(reports):
+    device_update = DeviceUpdate_pb2.DeviceUpdate()
+    wrapper = device_update.deviceMetadata.information.locationInformation.reports.recentLocationAndNetworkLocations
+    for seen_at, device_time_offset in reports:
+        wrapper.networkLocations.add().geoLocation.deviceTimeOffset = device_time_offset
+        wrapper.networkLocationTimestamps.add().seconds = seen_at
+    return device_update
+
+
+def test_estimate_clock_zero_uses_tightest_report():
+    zero = PAIR_DATE + 12_000
+    device_update = _device_update([
+        (zero + 50 * ROTATION_PERIOD + 300, 50 * ROTATION_PERIOD),
+        (zero + 60 * ROTATION_PERIOD + 900, 60 * ROTATION_PERIOD),
+    ])
+
+    assert upload.estimate_clock_zero(device_update) == zero + 300 - ROTATION_PERIOD // 2
+
+
+def test_estimate_clock_zero_includes_recent_location():
+    zero = PAIR_DATE + 12_000
+    device_update = _device_update([(zero + 60 * ROTATION_PERIOD + 900, 60 * ROTATION_PERIOD)])
+    wrapper = device_update.deviceMetadata.information.locationInformation.reports.recentLocationAndNetworkLocations
+    wrapper.recentLocation.geoLocation.deviceTimeOffset = 70 * ROTATION_PERIOD
+    wrapper.recentLocationTimestamp.seconds = zero + 70 * ROTATION_PERIOD + 100
+
+    assert upload.estimate_clock_zero(device_update) == zero + 100 - ROTATION_PERIOD // 2
+
+
+def test_estimate_clock_zero_without_reports():
+    assert upload.estimate_clock_zero(_device_update([])) is None
+    assert upload.estimate_clock_zero(_device_update([(PAIR_DATE, 0)])) is None
+
+
+def test_refresh_owned_trackers_uses_calibrated_clock(monkeypatch):
+    sent = []
+    _patch(monkeypatch, sent)
+    monkeypatch.setattr(upload.time, "time", lambda: PAIR_DATE + 100 * ROTATION_PERIOD)
+    device_list = DeviceUpdate_pb2.DevicesList()
+    _device(device_list, "Keys", "tracker-1")
+    _device(device_list, "Bag", "tracker-2")
+    zero = PAIR_DATE + 5 * ROTATION_PERIOD
+
+    upload.refresh_owned_trackers(device_list, drift_slots=0, clock_zeros={"tracker-1": zero})
+
+    request = DeviceUpdate_pb2.UploadPrecomputedPublicKeyIdsRequest()
+    request.ParseFromString(sent[0][1])
+    calibrated, fallback = request.deviceEids
+    assert calibrated.pairDate == PAIR_DATE
+    first = calibrated.clientList.publicKeyIdInfo[0]
+    assert first.publicKeyId.truncatedEid == generate_eid(EIK, first.timestamp.seconds - zero)[:10]
+    first = fallback.clientList.publicKeyIdInfo[0]
+    assert first.publicKeyId.truncatedEid == generate_eid(EIK, first.timestamp.seconds - PAIR_DATE)[:10]
+
+
+def test_upload_once_calibrates_each_tracker(monkeypatch):
+    device_list = DeviceUpdate_pb2.DevicesList()
+    _device(device_list, "Keys", "tracker-1")
+    _device(device_list, "Bag", "tracker-2")
+    _device(device_list, "Phone", "phone-1", phone=True)
+    raw = {"tracker-1": _device_update([(PAIR_DATE + 2000, ROTATION_PERIOD)]).SerializeToString().hex()}
+    located, received = [], {}
+
+    async def _locate(canonic_id, name, timeout):
+        located.append(canonic_id)
+        return [], ({"raw_hex": raw[canonic_id]} if canonic_id in raw else {"timed_out": True})
+
+    def _refresh(device_list, drift_slots, dry_run, clock_zeros):
+        received.update(clock_zeros)
+        return 2
+
+    monkeypatch.setattr(eid_upload, "is_logged_in", lambda: True)
+    monkeypatch.setattr(eid_upload, "request_device_list", lambda: device_list.SerializeToString().hex())
+    monkeypatch.setattr(eid_upload, "locate_device_with_capture", _locate)
+    monkeypatch.setattr(eid_upload, "refresh_owned_trackers", _refresh)
+
+    assert asyncio.run(eid_upload.upload_once(dry_run=True)) == 2
+    assert sorted(located) == ["tracker-1", "tracker-2"]
+    assert received == {"tracker-1": PAIR_DATE + 2000 - ROTATION_PERIOD - ROTATION_PERIOD // 2}
