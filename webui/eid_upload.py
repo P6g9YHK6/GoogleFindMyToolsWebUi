@@ -90,11 +90,17 @@ async def upload_once(dry_run: bool) -> int:
         return 0
     device_list = parse_device_list_protobuf(await run_blocking(request_device_list))
 
-    trackers = [
-        (device.identifierInformation.canonicIds.canonicId[0].id, device.userDefinedDeviceName)
-        for device in device_list.deviceMetadata
-        if device.identifierInformation.type != IDENTIFIER_ANDROID
-    ]
+    trackers = []
+    for device in device_list.deviceMetadata:
+        if device.identifierInformation.type == IDENTIFIER_ANDROID:
+            continue
+        # Some non-Android devices may not have a canonicId (e.g. certain
+        # accessories or legacy devices). Skip those to avoid IndexError.
+        canonic_ids = device.identifierInformation.canonicIds.canonicId
+        if not canonic_ids:
+            logger.debug("Skipping device %s: no canonicId", device.userDefinedDeviceName)
+            continue
+        trackers.append((canonic_ids[0].id, device.userDefinedDeviceName))
 
     # Calibrate clock zeros (use persisted if fresh, otherwise re-calibrate)
     clock_zeros = {}
