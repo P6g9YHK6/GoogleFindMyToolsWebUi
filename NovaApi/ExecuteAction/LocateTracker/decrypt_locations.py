@@ -6,8 +6,8 @@
 import datetime
 import hashlib
 import logging
-import time
 import threading
+import time
 
 from cryptography.exceptions import InvalidTag
 
@@ -84,12 +84,12 @@ def decrypt_location_response_locations(device_update_protobuf):
 
     location_time_array = []
     undecryptable = []
-    for loc, time in zip(network_locations, network_locations_time):
+    for loc, ts in zip(network_locations, network_locations_time):
 
         if loc.status == Common_pb2.Status.SEMANTIC:
             wrapped_location = WrappedLocation(
                 decrypted_location=b'',
-                time=int(time.seconds),
+                time=int(ts.seconds),
                 accuracy=0,
                 status=loc.status,
                 is_own_report=True,
@@ -113,13 +113,13 @@ def decrypt_location_response_locations(device_update_protobuf):
                 # upload whose clock base was wrong) shouldn't hide all the
                 # others in the same response. Skipped here, but the whole
                 # locate still fails if none of them decrypt (see below).
-                _log_mac_failure(time.seconds, e)
+                _log_mac_failure(ts.seconds, e)
                 undecryptable.append(e)
                 continue
 
             wrapped_location = WrappedLocation(
                 decrypted_location=decrypted_location,
-                time=int(time.seconds),
+                time=int(ts.seconds),
                 accuracy=loc.geoLocation.accuracy,
                 status=loc.status,
                 is_own_report=loc.geoLocation.encryptedReport.isOwnReport,
