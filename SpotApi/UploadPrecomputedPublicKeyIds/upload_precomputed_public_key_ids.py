@@ -125,23 +125,25 @@ def refresh_owned_trackers(device_list: DevicesList, drift_slots: int = 2, dry_r
             continue
 
         canonic_id = device.identifierInformation.canonicIds.canonicId[0].id
-        clock_zero = (clock_zeros or {}).get(canonic_id, registration.pairDate)
-
+        raw_clock_zero = (clock_zeros or {}).get(canonic_id, registration.pairDate)
+        now = int(time.time())
+        effective_clock_zero = now if raw_clock_zero > now else raw_clock_zero
         new_truncated_ids = UploadPrecomputedPublicKeyIdsRequest.DevicePublicKeyIds()
         # The server turns our timestamps back into beacon counters as
-        # timestamp - pairDate, so pairDate has to be the clock zero the
-        # timestamps below are relative to. Sending the real pairing date
-        # here would offset every reported counter and break decryption.
-        new_truncated_ids.pairDate = clock_zero
+        # timestamp - pairDate, so pairDate must be the clock zero the
+        # timestamps below are relative to. Using a future clock zero would
+        # produce timestamps in the future, which the server rejects. Clamp
+        # to the current time if needed.
+        new_truncated_ids.pairDate = effective_clock_zero
         new_truncated_ids.canonicId.id = canonic_id
 
-        next_eids = get_rotating_eids(identity_key, clock_zero, start_date,
+        next_eids = get_rotating_eids(identity_key, effective_clock_zero, start_date,
                                       duration_seconds=max_truncated_eid_seconds_server, drift_slots=drift_slots)
         new_truncated_ids.clientList.publicKeyIdInfo.extend(next_eids)
         request.deviceEids.append(new_truncated_ids)
 
         logger.info("%s EIDs for %s (clock zero pairDate%+ds, %d entries, first %s)",
-                    "Would upload" if dry_run else "Uploading", name, clock_zero - registration.pairDate,
+                    "Would upload" if dry_run else "Uploading", name, raw_clock_zero - registration.pairDate,
                     len(next_eids), next_eids[0].publicKeyId.truncatedEid.hex() if next_eids else "-")
 
     if request.deviceEids and not dry_run:
