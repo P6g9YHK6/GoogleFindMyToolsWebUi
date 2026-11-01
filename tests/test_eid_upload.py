@@ -29,17 +29,24 @@ def _device(device_list, name, canonic_id, *, phone=False, mcu=False, with_key=T
 # --- get_rotating_eids --------------------------------------------------
 
 def test_rotating_eids_follow_tracker_clock():
+    # When clock_zero == pair_date, timestamps should be pair_date + beacon_offset
     start = PAIR_DATE + 10 * ROTATION_PERIOD + 100
-    eids = upload.get_rotating_eids(EIK, PAIR_DATE, start, duration_seconds=3 * ROTATION_PERIOD)
+    eids = upload.get_rotating_eids(EIK, PAIR_DATE, PAIR_DATE, start, duration_seconds=3 * ROTATION_PERIOD)
 
-    assert [e.timestamp.seconds for e in eids] == [PAIR_DATE + i * ROTATION_PERIOD for i in range(10, 14)]
-    for i, e in zip(range(10, 14), eids):
+    # The iterator aligns to rotation periods based on clock_zero
+    # start = PAIR_DATE + 10*RP + 100, clock_zero = PAIR_DATE
+    # min_k = ceil((10*RP + 100) / RP) = 11
+    # max_k = floor((start + 3*RP) / RP) = floor((10*RP + 100 + 3*RP) / RP) = 13
+    # So k = 11, 12, 13
+    assert [e.timestamp.seconds for e in eids] == [PAIR_DATE + i * ROTATION_PERIOD for i in range(11, 14)]
+    for i, e in zip(range(11, 14), eids):
         assert e.publicKeyId.truncatedEid == generate_eid(EIK, i * ROTATION_PERIOD)[:10]
 
 
 def test_rotating_eids_drift_slots_span_neighbouring_periods():
+    # With clock_zero == pair_date, drift slots span neighbouring periods
     start = PAIR_DATE + 10 * ROTATION_PERIOD
-    eids = upload.get_rotating_eids(EIK, PAIR_DATE, start, duration_seconds=0, drift_slots=2)
+    eids = upload.get_rotating_eids(EIK, PAIR_DATE, PAIR_DATE, start, duration_seconds=0, drift_slots=2)
 
     assert len(eids) == 5
     assert [e.timestamp.seconds for e in eids] == [
@@ -51,7 +58,8 @@ def test_rotating_eids_drift_slots_span_neighbouring_periods():
 
 
 def test_rotating_eids_never_go_before_pairing():
-    eids = upload.get_rotating_eids(EIK, PAIR_DATE, PAIR_DATE, duration_seconds=0, drift_slots=2)
+    # With clock_zero == pair_date, no timestamps before pair_date
+    eids = upload.get_rotating_eids(EIK, PAIR_DATE, PAIR_DATE, PAIR_DATE, duration_seconds=0, drift_slots=2)
 
     assert [e.timestamp.seconds for e in eids] == [
         PAIR_DATE + i * ROTATION_PERIOD for i in range(0, 3)
@@ -59,6 +67,22 @@ def test_rotating_eids_never_go_before_pairing():
     assert [e.publicKeyId.truncatedEid for e in eids] == [
         generate_eid(EIK, i * ROTATION_PERIOD)[:10] for i in range(0, 3)
     ]
+
+
+def test_rotating_eids_with_clock_offset():
+    # When clock_zero != pair_date, timestamps are shifted by the offset
+    clock_zero = PAIR_DATE + 5 * ROTATION_PERIOD
+    start = PAIR_DATE + 10 * ROTATION_PERIOD
+    eids = upload.get_rotating_eids(EIK, clock_zero, PAIR_DATE, start, duration_seconds=2 * ROTATION_PERIOD)
+
+    # At real_time = start = PAIR_DATE + 10*RP, tracker_clock = 5*RP
+    # beacon_counter = 5*RP, timestamp = pair_date + 5*RP = PAIR_DATE + 5*RP
+    # Next period: real_time = PAIR_DATE + 11*RP, tracker_clock = 6*RP, timestamp = PAIR_DATE + 6*RP
+    assert [e.timestamp.seconds for e in eids] == [
+        PAIR_DATE + i * ROTATION_PERIOD for i in range(5, 8)
+    ]
+    for i, e in zip(range(5, 8), eids):
+        assert e.publicKeyId.truncatedEid == generate_eid(EIK, i * ROTATION_PERIOD)[:10]
 
 
 # --- refresh_owned_trackers ---------------------------------------------
@@ -185,12 +209,23 @@ def test_refresh_owned_trackers_uses_calibrated_clock(monkeypatch):
     request = DeviceUpdate_pb2.UploadPrecomputedPublicKeyIdsRequest()
     request.ParseFromString(sent[0][1])
     calibrated, fallback = request.deviceEids
-    assert calibrated.pairDate == zero
+    # pairDate is always the registered pairDate
+    assert calibrated.pairDate == PAIR_DATE
+    # Timestamps are adjusted so that timestamp - pairDate = tracker_clock
     first = calibrated.clientList.publicKeyIdInfo[0]
-    assert first.publicKeyId.truncatedEid == generate_eid(EIK, first.timestamp.seconds - zero)[:10]
+    # Verify the invariant: counter = timestamp - pairDate is a multiple of RP
+    # and the EID matches generate_eid(EIK, counter)
+    counter = first.timestamp.seconds - calibrated.pairDate
+    assert counter >= 0
+    assert counter % ROTATION_PERIOD == 0
+    assert first.publicKeyId.truncatedEid == generate_eid(EIK, counter)[:10]
+    
     first = fallback.clientList.publicKeyIdInfo[0]
     assert fallback.pairDate == PAIR_DATE
-    assert first.publicKeyId.truncatedEid == generate_eid(EIK, first.timestamp.seconds - PAIR_DATE)[:10]
+    counter = first.timestamp.seconds - fallback.pairDate
+    assert counter >= 0
+    assert counter % ROTATION_PERIOD == 0
+    assert first.publicKeyId.truncatedEid == generate_eid(EIK, counter)[:10]
 
 
 def test_uploaded_pair_date_matches_eid_counter(monkeypatch):
