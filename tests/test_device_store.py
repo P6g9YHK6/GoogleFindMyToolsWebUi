@@ -1,7 +1,5 @@
 """Tests for webui/device_store.py - shared devices.yaml persistence."""
 
-import json
-import pytest
 
 from webui import config, device_store
 from webui.yaml_io import write_yaml_dict
@@ -129,7 +127,6 @@ def test_load_unlocked_corrupt_yaml(monkeypatch, tmp_path):
 def test_load_demo_mode(monkeypatch):
     """load() in demo mode returns demo seed."""
     import webui.demo_mode as demo_mode
-    import webui.demo_data as demo_data
     demo_mode.DEMO_MODE = True
     try:
         result = device_store.load()

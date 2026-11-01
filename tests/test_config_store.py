@@ -1,6 +1,5 @@
 """Tests for webui/forwarders/config_store.py - migration and normalization."""
 
-import pytest
 
 from webui.forwarders import config_store
 from webui.forwarders.presets import PRESETS
@@ -86,7 +85,6 @@ def test_migrate_legacy_endpoint_folds_params():
 
 def test_strip_endpoint_state():
     """Runtime state keys removed."""
-    from webui.forwarders.latest_values_store import STATE_KEYS
     entry = {"url": "http://x", "last_forward_status": "ok", "last_forward_time": 123}
     result = config_store._strip_endpoint_state(entry)
     assert "last_forward_status" not in result

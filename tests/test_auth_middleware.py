@@ -1,10 +1,7 @@
 """Tests for webui/auth_middleware.py - Basic Auth middleware."""
 
-import os
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from starlette.types import ASGIApp
 
 from webui import config
 from webui.auth_middleware import BasicAuthMiddleware
