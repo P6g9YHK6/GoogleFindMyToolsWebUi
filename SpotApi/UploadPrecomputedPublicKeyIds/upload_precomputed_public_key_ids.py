@@ -190,6 +190,7 @@ def get_rotating_eids(eik: bytes, clock_zero: int, start_date: int, duration_sec
     duration_seconds = int(duration_seconds)
     public_key_id_list = []
     eid_cache: dict[int, bytes] = {}
+    seen_offsets: set[int] = set()
 
     start_offset = max(0, start_date - clock_zero)
     current_time_offset = start_offset - (start_offset % ROTATION_PERIOD)
@@ -201,9 +202,12 @@ def get_rotating_eids(eik: bytes, clock_zero: int, start_date: int, duration_sec
             beacon_offset = current_time_offset + slot * ROTATION_PERIOD
             if beacon_offset < 0:
                 continue
+            if beacon_offset in seen_offsets:
+                continue
             timestamp = clock_zero + beacon_offset
             if timestamp > max_timestamp:
                 continue
+            seen_offsets.add(beacon_offset)
             if beacon_offset not in eid_cache:
                 eid_cache[beacon_offset] = generate_eid(eik, beacon_offset)[:10]
 
