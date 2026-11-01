@@ -138,7 +138,7 @@ def refresh_owned_trackers(device_list: DevicesList, drift_slots: int = 2, dry_r
         new_truncated_ids.canonicId.id = canonic_id
 
         next_eids = get_rotating_eids(identity_key, effective_clock_zero, start_date,
-                                      duration_seconds=max_truncated_eid_seconds_server, drift_slots=drift_slots)
+                                      duration_seconds=max_truncated_eid_seconds_server, drift_slots=drift_slots, now=now)
         new_truncated_ids.clientList.publicKeyIdInfo.extend(next_eids)
         request.deviceEids.append(new_truncated_ids)
 
@@ -173,7 +173,7 @@ def estimate_clock_zero(device_update: DeviceUpdate) -> int | None:
 
 
 def get_rotating_eids(eik: bytes, clock_zero: int, start_date: int, duration_seconds: int,
-                      drift_slots: int = 0) -> list[PublicKeyIdList.PublicKeyIdInfo]:
+                      drift_slots: int = 0, now: int | None = None) -> list[PublicKeyIdList.PublicKeyIdInfo]:
     """Like get_next_eids, but for a tracker whose EID actually rotates:
     each entry's EID is derived from the tracker's own clock (seconds since
     clock_zero, see FMDNCrypto/eid_generator.py) rather than a fixed static
@@ -184,7 +184,9 @@ def get_rotating_eids(eik: bytes, clock_zero: int, start_date: int, duration_sec
     With drift_slots > 0, the EIDs of the neighbouring rotation periods are
     listed too, each under its own clock_zero + offset timestamp so the
     server hands decryption the counter that entry was generated from. Those
-    slots absorb an estimate that is off by whole rotation periods."""
+    slots absorb an estimate that is off by whole rotation periods.
+    If `now` is provided, entries with timestamps in the future are omitted
+    (the server rejects them with INVALID_ARGUMENT)."""
     duration_seconds = int(duration_seconds)
     public_key_id_list = []
     eid_cache: dict[int, bytes] = {}
@@ -192,16 +194,21 @@ def get_rotating_eids(eik: bytes, clock_zero: int, start_date: int, duration_sec
     start_offset = max(0, start_date - clock_zero)
     current_time_offset = start_offset - (start_offset % ROTATION_PERIOD)
 
+    max_timestamp = now if now is not None else (1 << 63) - 1
+
     while current_time_offset <= start_offset + duration_seconds:
         for slot in range(-drift_slots, drift_slots + 1):
             beacon_offset = current_time_offset + slot * ROTATION_PERIOD
             if beacon_offset < 0:
                 continue
+            timestamp = clock_zero + beacon_offset
+            if timestamp > max_timestamp:
+                continue
             if beacon_offset not in eid_cache:
                 eid_cache[beacon_offset] = generate_eid(eik, beacon_offset)[:10]
 
             info = PublicKeyIdList.PublicKeyIdInfo()
-            info.timestamp.seconds = clock_zero + beacon_offset
+            info.timestamp.seconds = timestamp
             info.publicKeyId.truncatedEid = eid_cache[beacon_offset]
             public_key_id_list.append(info)
 
