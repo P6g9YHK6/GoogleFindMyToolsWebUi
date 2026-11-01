@@ -37,12 +37,14 @@ def test_rotating_eids_follow_tracker_clock():
         assert e.publicKeyId.truncatedEid == generate_eid(EIK, i * ROTATION_PERIOD)[:10]
 
 
-def test_rotating_eids_drift_slots_share_timestamp():
+def test_rotating_eids_drift_slots_span_neighbouring_periods():
     start = PAIR_DATE + 10 * ROTATION_PERIOD
     eids = upload.get_rotating_eids(EIK, PAIR_DATE, start, duration_seconds=0, drift_slots=2)
 
     assert len(eids) == 5
-    assert {e.timestamp.seconds for e in eids} == {PAIR_DATE + 10 * ROTATION_PERIOD}
+    assert [e.timestamp.seconds for e in eids] == [
+        PAIR_DATE + i * ROTATION_PERIOD for i in range(8, 13)
+    ]
     assert [e.publicKeyId.truncatedEid for e in eids] == [
         generate_eid(EIK, i * ROTATION_PERIOD)[:10] for i in range(8, 13)
     ]
@@ -51,6 +53,9 @@ def test_rotating_eids_drift_slots_share_timestamp():
 def test_rotating_eids_never_go_before_pairing():
     eids = upload.get_rotating_eids(EIK, PAIR_DATE, PAIR_DATE, duration_seconds=0, drift_slots=2)
 
+    assert [e.timestamp.seconds for e in eids] == [
+        PAIR_DATE + i * ROTATION_PERIOD for i in range(0, 3)
+    ]
     assert [e.publicKeyId.truncatedEid for e in eids] == [
         generate_eid(EIK, i * ROTATION_PERIOD)[:10] for i in range(0, 3)
     ]
@@ -180,11 +185,37 @@ def test_refresh_owned_trackers_uses_calibrated_clock(monkeypatch):
     request = DeviceUpdate_pb2.UploadPrecomputedPublicKeyIdsRequest()
     request.ParseFromString(sent[0][1])
     calibrated, fallback = request.deviceEids
-    assert calibrated.pairDate == PAIR_DATE
+    assert calibrated.pairDate == zero
     first = calibrated.clientList.publicKeyIdInfo[0]
     assert first.publicKeyId.truncatedEid == generate_eid(EIK, first.timestamp.seconds - zero)[:10]
     first = fallback.clientList.publicKeyIdInfo[0]
+    assert fallback.pairDate == PAIR_DATE
     assert first.publicKeyId.truncatedEid == generate_eid(EIK, first.timestamp.seconds - PAIR_DATE)[:10]
+
+
+def test_uploaded_pair_date_matches_eid_counter(monkeypatch):
+    # The server derives a reported beacon counter as timestamp - pairDate and
+    # decryption rebuilds the EID from that counter, so every uploaded entry
+    # must be consistent with the pairDate sent alongside it.
+    sent = []
+    _patch(monkeypatch, sent)
+    monkeypatch.setattr(upload, "max_truncated_eid_seconds_server", 5 * ROTATION_PERIOD)
+    monkeypatch.setattr(upload.time, "time", lambda: PAIR_DATE + 100 * ROTATION_PERIOD)
+    device_list = DeviceUpdate_pb2.DevicesList()
+    _device(device_list, "Keys", "tracker-1")
+
+    upload.refresh_owned_trackers(device_list, drift_slots=2,
+                                  clock_zeros={"tracker-1": PAIR_DATE + 137})
+
+    request = DeviceUpdate_pb2.UploadPrecomputedPublicKeyIdsRequest()
+    request.ParseFromString(sent[0][1])
+    device = request.deviceEids[0]
+    assert device.clientList.publicKeyIdInfo
+    for entry in device.clientList.publicKeyIdInfo:
+        counter = entry.timestamp.seconds - device.pairDate
+        assert counter >= 0
+        assert counter % ROTATION_PERIOD == 0
+        assert entry.publicKeyId.truncatedEid == generate_eid(EIK, counter)[:10]
 
 
 def test_upload_once_calibrates_each_tracker(monkeypatch):
@@ -195,9 +226,10 @@ def test_upload_once_calibrates_each_tracker(monkeypatch):
     raw = {"tracker-1": _device_update([(PAIR_DATE + 2000, ROTATION_PERIOD)]).SerializeToString().hex()}
     located, received = [], {}
 
-    async def _locate(canonic_id, name, timeout):
+    async def _locate(canonic_id, name, timeout, capture):
         located.append(canonic_id)
-        return [], ({"raw_hex": raw[canonic_id]} if canonic_id in raw else {"timed_out": True})
+        capture.update({"raw_hex": raw[canonic_id]} if canonic_id in raw else {"timed_out": True})
+        return [], capture
 
     def _refresh(device_list, drift_slots, dry_run, clock_zeros):
         received.update(clock_zeros)
@@ -210,4 +242,30 @@ def test_upload_once_calibrates_each_tracker(monkeypatch):
 
     assert asyncio.run(eid_upload.upload_once(dry_run=True)) == 2
     assert sorted(located) == ["tracker-1", "tracker-2"]
+    assert received == {"tracker-1": PAIR_DATE + 2000 - ROTATION_PERIOD - ROTATION_PERIOD // 2}
+
+
+def test_upload_once_calibrates_from_raw_reports_when_decryption_fails(monkeypatch):
+    # A tracker whose current reports fail their MAC check used to give up
+    # calibration (and keep uploading the wrong base) because decrypting the
+    # response raised after the raw payload had already been captured.
+    device_list = DeviceUpdate_pb2.DevicesList()
+    _device(device_list, "Bag", "tracker-1")
+    raw = _device_update([(PAIR_DATE + 2000, ROTATION_PERIOD)]).SerializeToString().hex()
+    received = {}
+
+    async def _locate(canonic_id, name, timeout, capture):
+        capture["raw_hex"] = raw
+        raise ValueError("MAC check failed")
+
+    def _refresh(device_list, drift_slots, dry_run, clock_zeros):
+        received.update(clock_zeros)
+        return 1
+
+    monkeypatch.setattr(eid_upload, "is_logged_in", lambda: True)
+    monkeypatch.setattr(eid_upload, "request_device_list", lambda: device_list.SerializeToString().hex())
+    monkeypatch.setattr(eid_upload, "locate_device_with_capture", _locate)
+    monkeypatch.setattr(eid_upload, "refresh_owned_trackers", _refresh)
+
+    assert asyncio.run(eid_upload.upload_once(dry_run=True)) == 1
     assert received == {"tracker-1": PAIR_DATE + 2000 - ROTATION_PERIOD - ROTATION_PERIOD // 2}

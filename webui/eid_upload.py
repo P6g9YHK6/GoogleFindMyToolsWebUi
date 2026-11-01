@@ -33,11 +33,19 @@ MODES = ("off", "dry-run", "on")
 
 
 async def _clock_zero(canonic_id: str, name: str) -> int | None:
+    # The raw response is captured before decryption, so a tracker whose
+    # current reports still fail their MAC check can be calibrated from it
+    # anyway - which matters exactly when a bad upload needs correcting.
+    capture: dict = {}
     try:
-        _, capture = await locate_device_with_capture(canonic_id, name, timeout=config.LOCATE_TIMEOUT_S)
+        await locate_device_with_capture(
+            canonic_id, name, timeout=config.LOCATE_TIMEOUT_S, capture=capture,
+        )
     except Exception as e:
-        logger.info("Couldn't locate %s to calibrate its clock, using pairDate: %s", name, e)
-        return None
+        if "raw_hex" not in capture:
+            logger.info("Couldn't locate %s to calibrate its clock, using pairDate: %s", name, e)
+            return None
+        logger.info("Reports for %s didn't decrypt, calibrating from the raw response: %s", name, e)
     if "raw_hex" not in capture:
         return None
     return estimate_clock_zero(parse_device_update_protobuf(capture["raw_hex"]))

@@ -7,6 +7,8 @@ import datetime
 import hashlib
 import logging
 
+from cryptography.exceptions import InvalidTag
+
 from FMDNCrypto.foreign_tracker_cryptor import decrypt
 from KeyBackup.cloud_key_decryptor import decrypt_aes_gcm
 from NovaApi.ExecuteAction.LocateTracker.decrypted_location import WrappedLocation
@@ -74,6 +76,7 @@ def decrypt_location_response_locations(device_update_protobuf):
         network_locations_time.append(recent_location_time)
 
     location_time_array = []
+    undecryptable = []
     for loc, time in zip(network_locations, network_locations_time):
 
         if loc.status == Common_pb2.Status.SEMANTIC:
@@ -91,12 +94,22 @@ def decrypt_location_response_locations(device_update_protobuf):
             encrypted_location = loc.geoLocation.encryptedReport.encryptedLocation
             public_key_random = loc.geoLocation.encryptedReport.publicKeyRandom
 
-            if public_key_random == b"":  # Own Report
-                identity_key_hash = hashlib.sha256(identity_key).digest()
-                decrypted_location = decrypt_aes_gcm(identity_key_hash, encrypted_location)
-            else:
-                time_offset = 0 if is_mcu else loc.geoLocation.deviceTimeOffset
-                decrypted_location = decrypt(identity_key, encrypted_location, public_key_random, time_offset)
+            try:
+                if public_key_random == b"":  # Own Report
+                    identity_key_hash = hashlib.sha256(identity_key).digest()
+                    decrypted_location = decrypt_aes_gcm(identity_key_hash, encrypted_location)
+                else:
+                    time_offset = 0 if is_mcu else loc.geoLocation.deviceTimeOffset
+                    decrypted_location = decrypt(identity_key, encrypted_location, public_key_random, time_offset)
+            except (ValueError, InvalidTag) as e:
+                # One undecryptable sighting (e.g. one matched to an older EID
+                # upload whose clock base was wrong) shouldn't hide all the
+                # others in the same response. Skipped here, but the whole
+                # locate still fails if none of them decrypt (see below).
+                logger.warning("Skipping undecryptable location report at %s: %s",
+                               datetime.datetime.fromtimestamp(int(time.seconds)).strftime("%Y-%m-%d %H:%M:%S"), e)
+                undecryptable.append(e)
+                continue
 
             wrapped_location = WrappedLocation(
                 decrypted_location=decrypted_location,
@@ -109,6 +122,8 @@ def decrypt_location_response_locations(device_update_protobuf):
             location_time_array.append(wrapped_location)
 
     if not location_time_array:
+        if undecryptable:
+            raise undecryptable[-1]
         logger.info("No locations found.")
         return []
 

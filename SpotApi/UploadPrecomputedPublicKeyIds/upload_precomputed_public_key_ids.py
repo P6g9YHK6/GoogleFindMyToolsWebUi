@@ -91,8 +91,17 @@ def refresh_owned_trackers(device_list: DevicesList, drift_slots: int = 2, dry_r
     read zero, as estimated by estimate_clock_zero below; trackers missing
     from it fall back to pairDate, which is the same thing as of pairing
     but can be hours off by now. drift_slots extra rotation periods either
-    side of that estimate are uploaded under each timestamp to absorb the
-    remaining error. Phones and µC trackers are
+    side of that estimate are uploaded too, each under its own timestamp,
+    to absorb the remaining error.
+
+    The uploaded pairDate is set to the same clock zero the timestamps are
+    based on, not to the device's real pairing date: the server reports a
+    sighting's beacon counter as deviceTimeOffset = timestamp - pairDate,
+    and decryption derives the EID from exactly that counter. Both sides
+    must share the clock_zero base or every crowdsourced report fails its
+    MAC check.
+
+    Phones and µC trackers are
     skipped (phones upload their own, µC trackers are handled by
     refresh_custom_trackers above). Returns how many trackers were (or in
     dry_run, would have been) uploaded."""
@@ -119,7 +128,11 @@ def refresh_owned_trackers(device_list: DevicesList, drift_slots: int = 2, dry_r
         clock_zero = (clock_zeros or {}).get(canonic_id, registration.pairDate)
 
         new_truncated_ids = UploadPrecomputedPublicKeyIdsRequest.DevicePublicKeyIds()
-        new_truncated_ids.pairDate = registration.pairDate
+        # The server turns our timestamps back into beacon counters as
+        # timestamp - pairDate, so pairDate has to be the clock zero the
+        # timestamps below are relative to. Sending the real pairing date
+        # here would offset every reported counter and break decryption.
+        new_truncated_ids.pairDate = clock_zero
         new_truncated_ids.canonicId.id = canonic_id
 
         next_eids = get_rotating_eids(identity_key, clock_zero, start_date,
@@ -162,9 +175,14 @@ def get_rotating_eids(eik: bytes, clock_zero: int, start_date: int, duration_sec
     """Like get_next_eids, but for a tracker whose EID actually rotates:
     each entry's EID is derived from the tracker's own clock (seconds since
     clock_zero, see FMDNCrypto/eid_generator.py) rather than a fixed static
-    one.
+    one, and is listed under clock_zero + that clock offset. Callers must
+    upload the same clock_zero as pairDate so the server, which computes a
+    report's beacon counter as timestamp - pairDate, hands decryption the
+    counter the EID was generated from.
     With drift_slots > 0, the EIDs of the neighbouring rotation periods are
-    listed under the same timestamp as well."""
+    listed too, each under its own clock_zero + offset timestamp so the
+    server hands decryption the counter that entry was generated from. Those
+    slots absorb an estimate that is off by whole rotation periods."""
     duration_seconds = int(duration_seconds)
     public_key_id_list = []
     eid_cache: dict[int, bytes] = {}
@@ -181,7 +199,7 @@ def get_rotating_eids(eik: bytes, clock_zero: int, start_date: int, duration_sec
                 eid_cache[beacon_offset] = generate_eid(eik, beacon_offset)[:10]
 
             info = PublicKeyIdList.PublicKeyIdInfo()
-            info.timestamp.seconds = clock_zero + current_time_offset
+            info.timestamp.seconds = clock_zero + beacon_offset
             info.publicKeyId.truncatedEid = eid_cache[beacon_offset]
             public_key_id_list.append(info)
 
