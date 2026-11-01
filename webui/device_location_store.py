@@ -84,6 +84,25 @@ def sort_newest_first(locations: list[dict]) -> list[dict]:
     return sorted(locations, key=_time_key, reverse=True)
 
 
+def _max_fix_time(locations: list[dict]) -> int | None:
+    times = [loc["time"] for loc in locations if not loc.get("is_semantic") and loc.get("time")]
+    return max(times) if times else None
+
+
+def get_newest_fix_time(canonic_id: str) -> int | None:
+    """The newest "time" ever seen for this device, not just in the last
+    fetch. Google doesn't return a stable set of reports: a recent crowd
+    report can drop out of one response and reappear in the next, and
+    set_last_location replaces the stored list each time, so the newest
+    time in get_last_location's list can go backwards. Staleness reads this
+    instead so one of those responses can't flip a device to stale. Also
+    folds in the stored list itself, for an entry saved before
+    "newest_fix_time" existed."""
+    location = (device_store.load()["devices"].get(canonic_id) or {}).get("location") or {}
+    candidates = [t for t in (location.get("newest_fix_time"), _max_fix_time(location.get("locations", []))) if t]
+    return max(candidates) if candidates else None
+
+
 def get_last_location(canonic_id: str) -> dict | None:
     """{"locations": [...], "fetched_at": <unix ts>}, or None if nothing's
     ever been obtained for this device. Each location carries "first_seen" -
@@ -150,7 +169,15 @@ def set_last_location(canonic_id: str, locations: list[dict], fetched_at: int) -
             persisted.append({**loc, "first_seen": first_seen})
             stamped.append({**loc, "first_seen": first_seen, "_new_this_fetch": is_new})
 
-        entry["location"] = {"locations": persisted, "fetched_at": fetched_at}
+        new_location = {"locations": persisted, "fetched_at": fetched_at}
+        # High-water mark that only moves forward - see get_newest_fix_time.
+        candidates = [
+            t for t in (location.get("newest_fix_time"), _max_fix_time(location.get("locations", [])),
+                        _max_fix_time(persisted)) if t
+        ]
+        if candidates:
+            new_location["newest_fix_time"] = max(candidates)
+        entry["location"] = new_location
         out["stamped"] = stamped
 
     device_store.mutate_device(canonic_id, _stamp)

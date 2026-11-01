@@ -199,3 +199,53 @@ def test_most_recent_only_returns_unchanged_if_nothing_has_a_time():
 
 def test_most_recent_only_handles_an_empty_list():
     assert device_location_store.most_recent_only([]) == []
+
+
+def test_newest_fix_time_does_not_go_backwards_when_a_later_fetch_drops_the_recent_report(tmp_path, monkeypatch):
+    """Google's response isn't a stable set: a recent crowd report can drop
+    out of one fetch (leaving only an older one) and come back in the next."""
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+
+    old = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": 1000}
+    recent = {"is_semantic": False, "latitude": 1.0, "longitude": 2.1, "time": 5000}
+    device_location_store.set_last_location("dev-1", [recent, old], fetched_at=5100)
+    device_location_store.set_last_location("dev-1", [old], fetched_at=5400)
+
+    assert device_location_store.get_newest_fix_time("dev-1") == 5000
+    assert [loc["time"] for loc in device_location_store.get_last_location("dev-1")["locations"]] == [1000]
+
+
+def test_newest_fix_time_moves_forward_and_ignores_semantic_locations(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+
+    device_location_store.set_last_location("dev-1", [{"is_semantic": False, "time": 1000}], fetched_at=1)
+    device_location_store.set_last_location(
+        "dev-1", [{"is_semantic": True, "semantic_name": "Home", "time": 9000}, {"is_semantic": False, "time": 2000}],
+        fetched_at=2,
+    )
+
+    assert device_location_store.get_newest_fix_time("dev-1") == 2000
+
+
+def test_newest_fix_time_falls_back_to_the_stored_list_for_an_entry_saved_before_the_field_existed(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+    from webui import device_store
+
+    device_store.mutate_device(
+        "dev-1", lambda e: e.update(location={"locations": [{"is_semantic": False, "time": 3000}], "fetched_at": 1}),
+    )
+    assert device_location_store.get_newest_fix_time("dev-1") == 3000
+
+    # ...and the first fetch after upgrading seeds the high-water mark from it.
+    device_location_store.set_last_location("dev-1", [{"is_semantic": False, "time": 1000}], fetched_at=2)
+    assert device_location_store.get_newest_fix_time("dev-1") == 3000
+
+
+def test_newest_fix_time_is_none_with_nothing_stored(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+
+    assert device_location_store.get_newest_fix_time("dev-1") is None

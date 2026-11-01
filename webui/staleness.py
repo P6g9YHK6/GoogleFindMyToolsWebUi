@@ -124,13 +124,10 @@ def format_duration(seconds: float | int | None) -> str:
 def _newest_fix_time(canonic_id: str) -> int | None:
     """The freshest "time" (the fix's own timestamp, not when we happened to
     fetch it - see device_location_store.py's first_seen for that other,
-    deliberately-not-used-here signal) across whatever's on file for this
-    device, or None if nothing's ever been located."""
-    last = device_location_store.get_last_location(canonic_id)
-    if not last or not last.get("locations"):
-        return None
-    times = [loc.get("time") for loc in last["locations"] if not loc.get("is_semantic") and loc.get("time")]
-    return max(times) if times else None
+    deliberately-not-used-here signal) ever seen for this device, or None if
+    nothing's ever been located. Ever seen, not just in the last fetch -
+    see device_location_store.get_newest_fix_time for why."""
+    return device_location_store.get_newest_fix_time(canonic_id)
 
 
 def compute_status(canonic_id: str, staleness_cfg: dict, now: float | None = None) -> dict:
