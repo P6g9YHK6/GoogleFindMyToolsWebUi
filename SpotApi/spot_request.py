@@ -28,19 +28,26 @@ def spot_request(api_scope: str, payload: bytes) -> bytes:
         "Grpc-Accept-Encoding": "gzip"
     }
 
-    payload = GrpcParser.construct_grpc(payload)
+    grpc_payload = GrpcParser.construct_grpc(payload)
+    payload_size = len(grpc_payload)
 
     # httpx is necessary because requests does not support the Te header
     query_throttle.wait_turn()
+    import time
+    start = time.monotonic()
     with httpx.Client(http2=True, timeout=30.0) as client:
-        response = client.post(url, headers=headers, content=payload)
+        response = client.post(url, headers=headers, content=grpc_payload)
+    elapsed = time.monotonic() - start
 
-        if response.status_code == 200:
-            result = GrpcParser.extract_grpc_payload(response.content)
-            return result
+    logger.info("Spot request %s: %d bytes payload, %.2fs latency, status %s",
+                api_scope, payload_size, elapsed, response.status_code)
 
-        soup = BeautifulSoup(response.text, 'html.parser')
-        error_text = soup.get_text().strip()
-        logger.warning("Spot request to %s failed with %s: %s", api_scope, response.status_code, error_text)
-        # Raise like nova_request() instead of returning b'' - see that module.
-        raise RuntimeError(f"Spot request to {api_scope} failed with {response.status_code}: {error_text}")
+    if response.status_code == 200:
+        result = GrpcParser.extract_grpc_payload(response.content)
+        return result
+
+    soup = BeautifulSoup(response.text, 'html.parser')
+    error_text = soup.get_text().strip()
+    logger.warning("Spot request to %s failed with %s: %s", api_scope, response.status_code, error_text)
+    # Raise like nova_request() instead of returning b'' - see that module.
+    raise RuntimeError(f"Spot request to {api_scope} failed with {response.status_code}: {error_text}")

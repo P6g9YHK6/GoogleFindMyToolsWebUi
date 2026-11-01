@@ -6,6 +6,8 @@
 import datetime
 import hashlib
 import logging
+import time
+import threading
 
 from cryptography.exceptions import InvalidTag
 
@@ -17,6 +19,11 @@ from ProtoDecoders.decoder import parse_device_update_protobuf
 from SpotApi.identity_key import is_mcu_tracker, retrieve_identity_key
 
 logger = logging.getLogger(__name__)
+
+# Track MAC failures for hourly summary log (reduces log spam)
+_mac_failures_lock = threading.Lock()
+_mac_failure_count = 0
+_mac_failure_window_start = time.time()
 
 
 def create_map_links(latitude, longitude):
@@ -106,8 +113,7 @@ def decrypt_location_response_locations(device_update_protobuf):
                 # upload whose clock base was wrong) shouldn't hide all the
                 # others in the same response. Skipped here, but the whole
                 # locate still fails if none of them decrypt (see below).
-                logger.warning("Skipping undecryptable location report at %s: %s",
-                               datetime.datetime.fromtimestamp(int(time.seconds)).strftime("%Y-%m-%d %H:%M:%S"), e)
+                _log_mac_failure(time.seconds, e)
                 undecryptable.append(e)
                 continue
 
@@ -165,6 +171,26 @@ def decrypt_location_response_locations(device_update_protobuf):
         })
 
     return results
+
+
+def _log_mac_failure(report_time: int, exc: Exception):
+    """Track MAC failures and log an hourly summary instead of individual warnings."""
+    global _mac_failure_count, _mac_failure_window_start
+
+    now = time.time()
+    with _mac_failures_lock:
+        # Flush hourly summary if window expired
+        if now - _mac_failure_window_start >= 3600:
+            if _mac_failure_count > 0:
+                logger.info("MAC failures in last hour: %d (old reports from before clock-fix)",
+                            _mac_failure_count)
+            _mac_failure_count = 0
+            _mac_failure_window_start = now
+
+        _mac_failure_count += 1
+        # Log individual failure at DEBUG to keep WARNING clean
+        logger.debug("Skipping undecryptable location report at %s: %s",
+                     datetime.datetime.fromtimestamp(report_time).strftime("%Y-%m-%d %H:%M:%S"), exc)
 
 
 if __name__ == '__main__':

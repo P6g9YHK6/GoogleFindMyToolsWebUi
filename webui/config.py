@@ -37,6 +37,7 @@ STALENESS_SWEEP_INTERVAL_S = int(os.environ.get("STALENESS_SWEEP_INTERVAL_S", "3
 EID_UPLOAD = os.environ.get("EID_UPLOAD", "on").strip().lower()
 EID_UPLOAD_INTERVAL_S = int(os.environ.get("EID_UPLOAD_INTERVAL_S", str(12 * 3600)))
 EID_UPLOAD_DRIFT_SLOTS = int(os.environ.get("EID_UPLOAD_DRIFT_SLOTS", "2"))
+EID_UPLOAD_MAX_DAYS = int(os.environ.get("EID_UPLOAD_MAX_DAYS", "1"))
 
 # Account-wide throttle for every blocking call to Google's backend - see
 # webui/deps.py's run_blocking. At most QUERY_THROTTLE_MAX requests per
