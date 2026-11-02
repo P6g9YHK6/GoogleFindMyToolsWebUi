@@ -196,7 +196,7 @@ def _log_mac_failure(report_time: int, exc: Exception):
         # Flush hourly summary if window expired
         if now - _mac_failure_window_start >= 3600:
             if _mac_failure_count > 0:
-                logger.info("MAC failures in last hour: %d (old reports from before clock-fix)",
+                logger.info("MAC failures in last hour: %d (no nearby counter decrypted them)",
                             _mac_failure_count)
             _mac_failure_count = 0
             _mac_failure_window_start = now
