@@ -2,6 +2,7 @@ import asyncio
 import time
 
 from FMDNCrypto.eid_generator import ROTATION_PERIOD, generate_eid
+from FMDNCrypto.foreign_tracker_cryptor import encrypt
 from ProtoDecoders import DeviceUpdate_pb2
 from SpotApi.CreateBleDevice.config import mcu_fast_pair_model_id
 from SpotApi.UploadPrecomputedPublicKeyIds import upload_precomputed_public_key_ids as upload
@@ -360,3 +361,26 @@ def test_clock_zero_keeps_expired_value_when_recalibration_fails(monkeypatch):
 
     assert asyncio.run(eid_upload._clock_zero("tracker-1", "Keys")) == 123
     assert devices["tracker-1"]["clock_zero"]["saved_at"] == expired
+
+
+def test_estimate_clock_zero_uses_the_counter_a_report_really_decrypts_under():
+    zero = PAIR_DATE + 12_000
+    true_counter = 60 * ROTATION_PERIOD
+    encrypted, sx = encrypt(b"location", b"\x07" * 32, generate_eid(EIK, true_counter))
+    device_update = _device_update([(zero + true_counter + 100, true_counter + 1885)])
+    wrapper = device_update.deviceMetadata.information.locationInformation.reports.recentLocationAndNetworkLocations
+    report = wrapper.networkLocations[0].geoLocation.encryptedReport
+    report.encryptedLocation = encrypted
+    report.publicKeyRandom = sx
+
+    assert upload.estimate_clock_zero(device_update, EIK) == zero + 100 - ROTATION_PERIOD // 2
+
+
+def test_estimate_clock_zero_leaves_out_reports_that_never_decrypt():
+    device_update = _device_update([(PAIR_DATE + 2000, ROTATION_PERIOD)])
+    wrapper = device_update.deviceMetadata.information.locationInformation.reports.recentLocationAndNetworkLocations
+    report = wrapper.networkLocations[0].geoLocation.encryptedReport
+    report.encryptedLocation = b"\x00" * 29
+    report.publicKeyRandom = generate_eid(EIK, 0)
+
+    assert upload.estimate_clock_zero(device_update, EIK) is None

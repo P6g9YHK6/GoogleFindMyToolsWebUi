@@ -24,6 +24,7 @@ import time
 from NovaApi.ListDevices.nbe_list_devices import request_device_list
 from ProtoDecoders.decoder import parse_device_list_protobuf, parse_device_update_protobuf
 from ProtoDecoders.DeviceUpdate_pb2 import IDENTIFIER_ANDROID
+from SpotApi.identity_key import retrieve_identity_key
 from SpotApi.UploadPrecomputedPublicKeyIds.upload_precomputed_public_key_ids import (
     estimate_clock_zero,
     refresh_owned_trackers,
@@ -55,6 +56,18 @@ def _get_persisted_clock_zero(canonic_id: str) -> tuple[int, int] | None:
     return None
 
 
+def _estimate_from_raw_response(raw_hex: str, name: str) -> int | None:
+    device_update = parse_device_update_protobuf(raw_hex)
+    registration = device_update.deviceMetadata.information.deviceRegistration
+    identity_key = None
+    if registration.encryptedUserSecrets.encryptedIdentityKey:
+        try:
+            identity_key = retrieve_identity_key(registration)
+        except Exception as e:
+            logger.info("Calibrating %s from its reported counters, no identity key: %s", name, e)
+    return estimate_clock_zero(device_update, identity_key)
+
+
 async def _clock_zero(canonic_id: str, name: str) -> int | None:
     # Check persisted clock zero first (if < 24h old)
     now = time.time()
@@ -83,7 +96,7 @@ async def _clock_zero(canonic_id: str, name: str) -> int | None:
         logger.info("Reports for %s didn't decrypt, calibrating from the raw response: %s", name, e)
     if "raw_hex" not in capture:
         return stale
-    estimate = estimate_clock_zero(parse_device_update_protobuf(capture["raw_hex"]))
+    estimate = await run_blocking(_estimate_from_raw_response, capture["raw_hex"], name)
     if estimate is None:
         return stale
     # Only a fresh estimate restarts the TTL, or it would never expire.

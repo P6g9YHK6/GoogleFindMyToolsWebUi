@@ -6,6 +6,7 @@ import logging
 import time
 
 from FMDNCrypto.eid_generator import ROTATION_PERIOD, generate_eid
+from FMDNCrypto.foreign_tracker_cryptor import decrypt_with_counter_search
 from ProtoDecoders.DeviceUpdate_pb2 import (
     IDENTIFIER_ANDROID,
     DevicesList,
@@ -147,23 +148,36 @@ def refresh_owned_trackers(device_list: DevicesList, drift_slots: int = 2, dry_r
     return len(request.deviceEids)
 
 
-def estimate_clock_zero(device_update: DeviceUpdate) -> int | None:
+def estimate_clock_zero(device_update: DeviceUpdate, identity_key: bytes | None = None) -> int | None:
     """Unix time a tracker's clock read zero, from the location reports in a
     LocateTracker response, or None without any. Each report carries the
     tracker clock it was encrypted under (deviceTimeOffset, rounded down to
     a rotation period) next to its own timestamp, which is never earlier
     than the sighting, so timestamp - deviceTimeOffset is an upper bound on
     clock zero that's at most one rotation period plus the reporting delay
-    too late. Takes the tightest bound and backs off half a period."""
+    too late. Takes the tightest bound and backs off half a period.
+
+    deviceTimeOffset can itself be wrong (see decrypt_with_counter_search), so
+    given identity_key, each report's counter is the one it really decrypts
+    under, and reports that decrypt under none are left out."""
     reports = device_update.deviceMetadata.information.locationInformation.reports.recentLocationAndNetworkLocations
     pairs = list(zip(reports.networkLocations, reports.networkLocationTimestamps))
     if reports.HasField("recentLocation"):
         pairs.append((reports.recentLocation, reports.recentLocationTimestamp))
-    bounds = [
-        timestamp.seconds - location.geoLocation.deviceTimeOffset
-        for location, timestamp in pairs
-        if location.geoLocation.deviceTimeOffset
-    ]
+    bounds = []
+    for location, timestamp in pairs:
+        counter = location.geoLocation.deviceTimeOffset
+        if not counter:
+            continue
+        report = location.geoLocation.encryptedReport
+        if identity_key and report.publicKeyRandom:
+            try:
+                _, counter = decrypt_with_counter_search(
+                    identity_key, report.encryptedLocation, report.publicKeyRandom, counter,
+                )
+            except ValueError:
+                continue
+        bounds.append(timestamp.seconds - counter)
     return min(bounds) - ROTATION_PERIOD // 2 if bounds else None
 
 
