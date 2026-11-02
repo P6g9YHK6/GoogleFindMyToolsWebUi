@@ -1,14 +1,10 @@
 """Tests for webui/routers/vnc_proxy.py - VNC proxy endpoints."""
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-from fastapi import WebSocket
 from fastapi.testclient import TestClient
 
 from webui import config, demo_mode
-from webui.routers import vnc_proxy
 from webui.main import app
 
 
@@ -63,7 +59,7 @@ def test_proxy_websocket_demo_mode():
     with patch.object(demo_mode, "is_demo_mode", return_value=True):
         client = TestClient(app)
         try:
-            with client.websocket_connect("/vnc/websockify") as ws:
+            with client.websocket_connect("/vnc/websockify"):
                 pass
         except Exception:
             pass  # WebSocketDisconnect is expected

@@ -1,13 +1,11 @@
 """Tests for webui/main.py - app lifespan and health endpoint."""
 
 import asyncio
-import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 
-from webui import config, demo_mode, main
+from webui import config, main
 from webui.auth_middleware import BasicAuthMiddleware
 
 
@@ -132,29 +130,6 @@ def test_health_endpoint_demo_mode_readonly_ok(monkeypatch):
         assert resp.json() == {"status": "ok"}
 
 
-def test_basic_auth_middleware_disabled():
-    """Middleware is no-op when HTTP_USER/HTTP_PASSWORD not set."""
-    assert BasicAuthMiddleware._enabled() is False
-
-
-def test_basic_auth_middleware_enabled(monkeypatch):
-    """Middleware enabled when both credentials set."""
-    monkeypatch.setattr(config, "HTTP_USER", "user")
-    monkeypatch.setattr(config, "HTTP_PASSWORD", "pass")
-    assert BasicAuthMiddleware._enabled() is True
-
-
-def test_basic_auth_middleware_partial_credentials(monkeypatch):
-    """Middleware disabled when only one credential set."""
-    monkeypatch.setattr(config, "HTTP_USER", "user")
-    monkeypatch.setattr(config, "HTTP_PASSWORD", None)
-    assert BasicAuthMiddleware._enabled() is False
-    
-    monkeypatch.setattr(config, "HTTP_USER", None)
-    monkeypatch.setattr(config, "HTTP_PASSWORD", "pass")
-    assert BasicAuthMiddleware._enabled() is False
-
-
 def test_basic_auth_middleware_health_endpoint_accessible(monkeypatch):
     """Health endpoint always accessible without auth."""
     monkeypatch.setattr(config, "HTTP_USER", "user")
@@ -203,9 +178,10 @@ def test_basic_auth_middleware_accepts_correct_credentials(monkeypatch):
     monkeypatch.setattr(config, "HTTP_USER", "user")
     monkeypatch.setattr(config, "HTTP_PASSWORD", "pass")
     
+    import base64
+
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    import base64
     
     app = FastAPI()
     app.add_middleware(BasicAuthMiddleware)
@@ -229,9 +205,10 @@ def test_basic_auth_middleware_rejects_wrong_credentials(monkeypatch):
     monkeypatch.setattr(config, "HTTP_USER", "user")
     monkeypatch.setattr(config, "HTTP_PASSWORD", "pass")
     
+    import base64
+
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    import base64
     
     app = FastAPI()
     app.add_middleware(BasicAuthMiddleware)

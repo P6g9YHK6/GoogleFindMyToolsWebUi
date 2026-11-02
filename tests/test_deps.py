@@ -1,12 +1,10 @@
 """Tests for webui/deps.py - blocking call wrappers and coalesced locates."""
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from webui import deps
-from webui import config
+from webui import config, deps
 
 
 async def test_run_blocking_executes_in_executor(monkeypatch):
@@ -53,7 +51,6 @@ async def test_locate_device_uses_semaphore(monkeypatch):
     monkeypatch.setattr(config, "DEMO_MODE", False)
     
     mock_get_location = AsyncMock(return_value={"locations": []})
-    mock_coalescer = AsyncMock(return_value={"locations": []})
     
     # Patch the class method on the LocateCoalescer class
     with patch("webui.locate_coalescer.LocateCoalescer.get_or_fetch", new_callable=AsyncMock, return_value={"locations": []}) as mock_coalescer:
@@ -179,7 +176,7 @@ async def test_register_tracker_normal_mode(monkeypatch):
     assert result["eid_hex"] == "abc123"
 
 
-async def test_register_tracker_invalidates_cache(monkeypatch):
+async def test_register_tracker_invalidates_cache_with_custom_params(monkeypatch):
     """register_tracker invalidates cache even with custom params."""
     monkeypatch.setattr(config, "DEMO_MODE", False)
     
@@ -213,46 +210,8 @@ async def test_register_tracker_uses_defaults(monkeypatch):
     assert call_args.kwargs["model_name"] == "µC"
 
 
-async def test_register_tracker_propagates_exception(monkeypatch):
-    """register_tracker propagates exception from register_esp32."""
-    monkeypatch.setattr(config, "DEMO_MODE", False)
-    
-    def failing_register(*args, **kwargs):
-        raise RuntimeError("registration failed")
-    
-    with patch("webui.deps.register_esp32", failing_register):
-        with pytest.raises(RuntimeError, match="registration failed"):
-            await deps.register_tracker()
-
-
-async def test_set_sound_normal_mode(monkeypatch):
-    """set_sound calls play_sound in normal mode."""
-    monkeypatch.setattr(config, "DEMO_MODE", False)
-    
-    mock_play = MagicMock(return_value={"result": "ok"})
-    
-    with patch("webui.deps.play_sound", mock_play):
-        result = await deps.set_sound("canonic-1", True)
-    
-    mock_play.assert_called_once_with("canonic-1", True)
-    assert result == {"result": "ok"}
-
-
-async def test_set_sound_propagates_exception(monkeypatch):
-    """set_sound propagates exception from play_sound."""
-    monkeypatch.setattr(config, "DEMO_MODE", False)
-    
-    def failing_play(*args, **kwargs):
-        raise RuntimeError("sound failed")
-    
-    with patch("webui.deps.play_sound", failing_play):
-        with pytest.raises(RuntimeError, match="sound failed"):
-            await deps.set_sound("canonic-1", True)
-
-
 async def test_query_gate_is_configured(monkeypatch):
     """query_gate is configured with settings_store.load."""
-    from webui import settings_store
     from webui.deps import query_gate, query_throttle
     
     assert query_gate is query_throttle
@@ -261,8 +220,9 @@ async def test_query_gate_is_configured(monkeypatch):
 
 async def test_executor_exists():
     """_executor exists and is configured."""
-    from webui.deps import _executor
     from concurrent.futures import ThreadPoolExecutor
+
+    from webui.deps import _executor
     
     assert isinstance(_executor, ThreadPoolExecutor)
     assert _executor._max_workers == 32
@@ -271,8 +231,9 @@ async def test_executor_exists():
 
 async def test_locate_semaphore_exists():
     """_locate_semaphore exists and is configured."""
-    from webui.deps import _locate_semaphore
     from asyncio import Semaphore
+
+    from webui.deps import _locate_semaphore
     
     assert isinstance(_locate_semaphore, Semaphore)
     # Default LOCATE_CONCURRENCY is 5

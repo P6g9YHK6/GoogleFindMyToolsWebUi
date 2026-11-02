@@ -1,21 +1,20 @@
 """Tests for webui/firmware_store.py - advertisement key persistence."""
 
-import pytest
 import yaml
 
 from webui import config
 from webui.firmware_store import (
+    DEFAULT_BUILD_SETTINGS,
+    DEFAULT_IDENTITY,
+    DEFAULT_KEEP_TRACK,
     _load_unlocked,
     _save_unlocked,
-    record_registration,
-    record_build_settings,
-    set_keep_track,
     list_registered,
     load_last_identity,
+    record_build_settings,
     record_identity,
-    DEFAULT_BUILD_SETTINGS,
-    DEFAULT_KEEP_TRACK,
-    DEFAULT_IDENTITY,
+    record_registration,
+    set_keep_track,
 )
 
 

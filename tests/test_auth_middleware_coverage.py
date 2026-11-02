@@ -3,8 +3,6 @@
 import base64
 import hmac
 
-import pytest
-
 from webui import config
 from webui.auth_middleware import BasicAuthMiddleware
 
@@ -194,6 +192,5 @@ def test_is_authorized_constant_time(monkeypatch):
     assert middleware._is_authorized(auth) is True
     
     # Verify hmac.compare_digest is constant time
-    import hmac
     assert hmac.compare_digest("user", "user") is True
     assert hmac.compare_digest("user", "attacker") is False
