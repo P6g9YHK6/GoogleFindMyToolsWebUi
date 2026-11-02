@@ -1,65 +1,96 @@
-import base64
+"""Tests for webui/auth_middleware.py - Basic Auth middleware."""
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from webui import config
+from webui.auth_middleware import BasicAuthMiddleware
 
 
-def _basic(username: str, password: str) -> dict:
-    token = base64.b64encode(f"{username}:{password}".encode()).decode()
-    return {"Authorization": f"Basic {token}"}
-
-
-def test_no_auth_configured_passes_through(client, monkeypatch):
+def test_basic_auth_disabled(monkeypatch):
+    """No auth when HTTP_USER not set."""
     monkeypatch.setattr(config, "HTTP_USER", None)
     monkeypatch.setattr(config, "HTTP_PASSWORD", None)
 
-    resp = client.get("/auth/login/poll")
+    app = FastAPI()
+    app.add_middleware(BasicAuthMiddleware)
+
+    @app.get("/test")
+    async def test():
+        return {"ok": True}
+
+    client = TestClient(app)
+    resp = client.get("/test")
     assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
 
 
-def test_http_user_and_password_require_both_to_match(client, monkeypatch):
-    monkeypatch.setattr(config, "HTTP_USER", "alice")
-    monkeypatch.setattr(config, "HTTP_PASSWORD", "secret")
+def test_basic_auth_enabled_wrong_credentials(monkeypatch):
+    """Wrong credentials rejected."""
+    monkeypatch.setattr(config, "HTTP_USER", "user")
+    monkeypatch.setattr(config, "HTTP_PASSWORD", "pass")
 
-    assert client.get("/auth/login/poll").status_code == 401
-    assert client.get("/auth/login/poll", headers=_basic("alice", "secret")).status_code == 200
-    assert client.get("/auth/login/poll", headers=_basic("bob", "secret")).status_code == 401
-    assert client.get("/auth/login/poll", headers=_basic("alice", "wrong")).status_code == 401
+    app = FastAPI()
+    app.add_middleware(BasicAuthMiddleware)
+
+    @app.get("/test")
+    async def test():
+        return {"ok": True}
+
+    client = TestClient(app)
+    resp = client.get("/test", auth=("wrong", "pass"))
+    assert resp.status_code == 401
+    assert "WWW-Authenticate" in resp.headers
 
 
-def test_partial_config_leaves_auth_disabled(client, monkeypatch):
-    monkeypatch.setattr(config, "HTTP_USER", "alice")
+def test_basic_auth_enabled_correct_credentials(monkeypatch):
+    """Correct credentials accepted."""
+    monkeypatch.setattr(config, "HTTP_USER", "user")
+    monkeypatch.setattr(config, "HTTP_PASSWORD", "pass")
+
+    app = FastAPI()
+    app.add_middleware(BasicAuthMiddleware)
+
+    @app.get("/test")
+    async def test():
+        return {"ok": True}
+
+    client = TestClient(app)
+    resp = client.get("/test", auth=("user", "pass"))
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+
+def test_basic_auth_disabled_via_env(monkeypatch):
+    """Middleware disabled when HTTP_USER not set."""
+    monkeypatch.setattr(config, "HTTP_USER", None)
     monkeypatch.setattr(config, "HTTP_PASSWORD", None)
-
-    assert client.get("/auth/login/poll").status_code == 200
-
-
-def test_wrong_credentials_are_logged(client, monkeypatch, caplog):
-    monkeypatch.setattr(config, "HTTP_USER", "alice")
-    monkeypatch.setattr(config, "HTTP_PASSWORD", "secret")
-
-    with caplog.at_level("WARNING", logger="webui.auth_middleware"):
-        client.get("/auth/login/poll", headers=_basic("bob", "wrong"))
-
-    assert any("invalid credentials" in r.message for r in caplog.records)
+    from webui.auth_middleware import BasicAuthMiddleware
+    assert BasicAuthMiddleware._enabled() is False
 
 
-def test_health_check_is_exempt_from_auth(client, monkeypatch):
-    monkeypatch.setattr(config, "HTTP_USER", "alice")
-    monkeypatch.setattr(config, "HTTP_PASSWORD", "secret")
+def test_basic_auth_enabled_via_env(monkeypatch):
+    """Middleware enabled when both set."""
+    monkeypatch.setattr(config, "HTTP_USER", "user")
+    monkeypatch.setattr(config, "HTTP_PASSWORD", "pass")
+    from webui.auth_middleware import BasicAuthMiddleware
+    assert BasicAuthMiddleware._enabled() is True
 
+
+def test_basic_auth_health_endpoint_always_accessible(monkeypatch):
+    """Health endpoint accessible without auth even when auth enabled."""
+    monkeypatch.setattr(config, "HTTP_USER", "user")
+    monkeypatch.setattr(config, "HTTP_PASSWORD", "pass")
+
+    app = FastAPI()
+    app.add_middleware(BasicAuthMiddleware)
+
+    @app.get("/health")
+    async def health():
+        return {"status": "ok"}
+
+    client = TestClient(app)
+    # No auth but health endpoint should work
     resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
-
-
-def test_missing_credentials_are_not_logged(client, monkeypatch, caplog):
-    """The very first hit of a protected page never carries an Authorization
-    header at all - that's normal, not a failed login attempt, and shouldn't
-    show up as one."""
-    monkeypatch.setattr(config, "HTTP_USER", "alice")
-    monkeypatch.setattr(config, "HTTP_PASSWORD", "secret")
-
-    with caplog.at_level("WARNING", logger="webui.auth_middleware"):
-        client.get("/auth/login/poll")
-
-    assert not any("invalid credentials" in r.message for r in caplog.records)

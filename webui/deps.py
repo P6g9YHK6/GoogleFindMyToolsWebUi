@@ -65,11 +65,17 @@ async def locate_device(canonic_id: str, name: str, timeout: float = config.LOCA
     return await locate_coalescer.get_or_fetch(canonic_id, _fetch)
 
 
-async def locate_device_with_capture(canonic_id: str, name: str, timeout: float = config.LOCATE_TIMEOUT_S):
+async def locate_device_with_capture(canonic_id: str, name: str, timeout: float = config.LOCATE_TIMEOUT_S,
+                                     capture: dict | None = None):
     """Same underlying request as locate_device(), plus the raw hex/protobuf-
     text behind the result (see get_location_data_for_device's `capture`
     param) - for the debug export (webui/routers/debug_export.py), which
     needs the wire payload itself, not just the decrypted locations.
+
+    Pass a dict as `capture` to receive the raw data even when decrypting the
+    response then fails (the payload is captured before that step), e.g. so
+    webui/eid_upload.py can calibrate a tracker whose reports don't decrypt
+    yet.
 
     Deliberately bypasses locate_coalescer: a caller joining someone else's
     in-flight fetch would get back an empty capture dict, since only the
@@ -86,7 +92,7 @@ async def locate_device_with_capture(canonic_id: str, name: str, timeout: float 
         # in demo mode (a live-query export is disabled entirely, not
         # faked - see that router).
         return demo_data.fake_locate_with_capture_result(canonic_id)
-    capture: dict = {}
+    capture = {} if capture is None else capture
     async with _locate_semaphore:
         locations = await run_blocking(get_location_data_for_device, canonic_id, name, timeout, capture)
     return locations, capture

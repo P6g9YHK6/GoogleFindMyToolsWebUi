@@ -6,8 +6,12 @@
 import datetime
 import hashlib
 import logging
+import threading
+import time
 
-from FMDNCrypto.foreign_tracker_cryptor import decrypt
+from cryptography.exceptions import InvalidTag
+
+from FMDNCrypto.foreign_tracker_cryptor import decrypt_with_counter_search
 from KeyBackup.cloud_key_decryptor import decrypt_aes_gcm
 from NovaApi.ExecuteAction.LocateTracker.decrypted_location import WrappedLocation
 from ProtoDecoders import Common_pb2, DeviceUpdate_pb2
@@ -15,6 +19,15 @@ from ProtoDecoders.decoder import parse_device_update_protobuf
 from SpotApi.identity_key import is_mcu_tracker, retrieve_identity_key
 
 logger = logging.getLogger(__name__)
+
+# Track MAC failures for hourly summary log (reduces log spam)
+_mac_failures_lock = threading.Lock()
+_mac_failure_count = 0
+_mac_failure_window_start = time.time()
+
+# Corrections already logged, so a tracker with a constant error logs it once
+# rather than on every poll.
+_logged_counter_corrections: set[tuple[str, int]] = set()
 
 
 def create_map_links(latitude, longitude):
@@ -53,7 +66,7 @@ def _status_name(status_value):
         return f"STATUS_UNKNOWN_{status_value}"
 
 
-def decrypt_location_response_locations(device_update_protobuf):
+def decrypt_location_response_locations(device_update_protobuf, name="tracker"):
 
     device_registration = device_update_protobuf.deviceMetadata.information.deviceRegistration
 
@@ -74,12 +87,13 @@ def decrypt_location_response_locations(device_update_protobuf):
         network_locations_time.append(recent_location_time)
 
     location_time_array = []
-    for loc, time in zip(network_locations, network_locations_time):
+    undecryptable = []
+    for loc, ts in zip(network_locations, network_locations_time):
 
         if loc.status == Common_pb2.Status.SEMANTIC:
             wrapped_location = WrappedLocation(
                 decrypted_location=b'',
-                time=int(time.seconds),
+                time=int(ts.seconds),
                 accuracy=0,
                 status=loc.status,
                 is_own_report=True,
@@ -91,16 +105,29 @@ def decrypt_location_response_locations(device_update_protobuf):
             encrypted_location = loc.geoLocation.encryptedReport.encryptedLocation
             public_key_random = loc.geoLocation.encryptedReport.publicKeyRandom
 
-            if public_key_random == b"":  # Own Report
-                identity_key_hash = hashlib.sha256(identity_key).digest()
-                decrypted_location = decrypt_aes_gcm(identity_key_hash, encrypted_location)
-            else:
-                time_offset = 0 if is_mcu else loc.geoLocation.deviceTimeOffset
-                decrypted_location = decrypt(identity_key, encrypted_location, public_key_random, time_offset)
+            try:
+                if public_key_random == b"":  # Own Report
+                    identity_key_hash = hashlib.sha256(identity_key).digest()
+                    decrypted_location = decrypt_aes_gcm(identity_key_hash, encrypted_location)
+                else:
+                    time_offset = 0 if is_mcu else loc.geoLocation.deviceTimeOffset
+                    decrypted_location, counter = decrypt_with_counter_search(
+                        identity_key, encrypted_location, public_key_random, time_offset,
+                    )
+                    if counter != time_offset:
+                        _log_counter_correction(name, counter - time_offset)
+            except (ValueError, InvalidTag) as e:
+                # One undecryptable sighting (e.g. one matched to an older EID
+                # upload whose clock base was wrong) shouldn't hide all the
+                # others in the same response. Skipped here, but the whole
+                # locate still fails if none of them decrypt (see below).
+                _log_mac_failure(ts.seconds, e)
+                undecryptable.append(e)
+                continue
 
             wrapped_location = WrappedLocation(
                 decrypted_location=decrypted_location,
-                time=int(time.seconds),
+                time=int(ts.seconds),
                 accuracy=loc.geoLocation.accuracy,
                 status=loc.status,
                 is_own_report=loc.geoLocation.encryptedReport.isOwnReport,
@@ -109,6 +136,8 @@ def decrypt_location_response_locations(device_update_protobuf):
             location_time_array.append(wrapped_location)
 
     if not location_time_array:
+        if undecryptable:
+            raise undecryptable[-1]
         logger.info("No locations found.")
         return []
 
@@ -150,6 +179,32 @@ def decrypt_location_response_locations(device_update_protobuf):
         })
 
     return results
+
+
+def _log_counter_correction(name: str, correction: int):
+    if (name, correction) not in _logged_counter_corrections:
+        _logged_counter_corrections.add((name, correction))
+        logger.info("Report for %s only decrypted with its counter corrected by %+ds.", name, correction)
+
+
+def _log_mac_failure(report_time: int, exc: Exception):
+    """Track MAC failures and log an hourly summary instead of individual warnings."""
+    global _mac_failure_count, _mac_failure_window_start
+
+    now = time.time()
+    with _mac_failures_lock:
+        # Flush hourly summary if window expired
+        if now - _mac_failure_window_start >= 3600:
+            if _mac_failure_count > 0:
+                logger.info("MAC failures in last hour: %d (no nearby counter decrypted them)",
+                            _mac_failure_count)
+            _mac_failure_count = 0
+            _mac_failure_window_start = now
+
+        _mac_failure_count += 1
+        # Log individual failure at DEBUG to keep WARNING clean
+        logger.debug("Skipping undecryptable location report at %s: %s",
+                     datetime.datetime.fromtimestamp(report_time).strftime("%Y-%m-%d %H:%M:%S"), exc)
 
 
 if __name__ == '__main__':

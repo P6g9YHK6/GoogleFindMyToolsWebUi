@@ -134,6 +134,27 @@ def test_sweep_sends_recovery_notice_once_fix_is_fresh_again(tmp_path, monkeypat
     assert cfg["alert_active"] is False
 
 
+def test_sweep_does_not_flap_when_a_fetch_drops_the_recent_report(tmp_path, monkeypatch, caplog):
+    """Reproduces what Google does in practice: a fetch with today's fix,
+    then one with only a week-old fix, then today's again. Neither of the
+    last two should log a stale alert or a recovery notice."""
+    _use_tmp_stores(tmp_path, monkeypatch)
+    now = 1_700_000_000
+    _configure_device()
+    fresh = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": now - 60}
+    old = {"is_semantic": False, "latitude": 1.0, "longitude": 2.0, "time": now - 8 * 86400}
+
+    with caplog.at_level(logging.WARNING, logger="webui.staleness"):
+        device_location_store.set_last_location(CANONIC_ID, [fresh, old], fetched_at=now)
+        staleness.sweep_once(now=now)
+        device_location_store.set_last_location(CANONIC_ID, [old], fetched_at=now + 300)
+        staleness.sweep_once(now=now + 300)
+        device_location_store.set_last_location(CANONIC_ID, [fresh, old], fetched_at=now + 600)
+        staleness.sweep_once(now=now + 600)
+    assert caplog.records == []
+    assert latest_values_store.get_device_staleness(CANONIC_ID)["alert_active"] is False
+
+
 def test_sweep_skips_muted_devices_entirely(tmp_path, monkeypatch, caplog):
     _use_tmp_stores(tmp_path, monkeypatch)
     now = 1_700_000_000

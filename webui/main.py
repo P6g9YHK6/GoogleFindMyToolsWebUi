@@ -13,6 +13,7 @@ from webui import (
     browser_provisioning,
     config,
     demo_mode,
+    eid_upload,
     esp_idf_provisioning,
     firmware_build,
     log_capture,
@@ -47,6 +48,9 @@ from webui.routers import (
 # they replaced used to. Set up before uvicorn's own dictConfig runs (this
 # module is imported first), so it doesn't get skipped as a no-op.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+# httpx logs every request's full URL at INFO, and a forwarding URL can carry
+# an access token and the coordinates being forwarded.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 BASE_DIR = pathlib.Path(__file__).parent
 
@@ -56,6 +60,7 @@ async def lifespan(app: FastAPI):
     notify.configure_apprise_logging(env=settings_store.apprise_env())
     log_capture.configure_log_capture()
     staleness_task = None
+    eid_upload_task = None
     if not demo_mode.is_demo_mode():
         # Nothing legitimate to poll in demo mode - every device is fake and
         # nothing is ever actually persisted (see webui/device_store.py) -
@@ -66,6 +71,8 @@ async def lifespan(app: FastAPI):
         # own docstring for why a device with no forwarding endpoints (never
         # polled by any of that module's per-device loops) still needs this.
         staleness_task = asyncio.create_task(staleness.sweep_loop())
+        # Returns straight away unless EID_UPLOAD is set, see webui/eid_upload.py.
+        eid_upload_task = asyncio.create_task(eid_upload.upload_loop())
         # Reclaim anything that grew while the app was down: a /firmware volume
         # (firmware_builds and the on-demand ESP-IDF toolchain, see config.py's
         # GFMT_FIRMWARE_* / GFMT_ESP_IDF_IDLE_TTL_S) shouldn't need a manual
@@ -81,6 +88,8 @@ async def lifespan(app: FastAPI):
     scheduler.stop_all()
     if staleness_task is not None:
         staleness_task.cancel()
+    if eid_upload_task is not None:
+        eid_upload_task.cancel()
     await browser_provisioning.on_shutdown()
 
 

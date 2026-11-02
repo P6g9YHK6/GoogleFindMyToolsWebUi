@@ -13,7 +13,11 @@ from ecdsa import SECP160r1
 from ecdsa.ellipticcurve import Point
 
 from example_data_provider import get_example_data
-from FMDNCrypto.eid_generator import calculate_r, generate_eid
+from FMDNCrypto.eid_generator import ROTATION_PERIOD, calculate_r, generate_eid
+
+# How many rotation periods either side of the reported counter to try when a
+# report doesn't decrypt at the counter Google sent with it.
+COUNTER_SEARCH_SLOTS = 3
 
 
 def rx_to_ry(Rx: int, curve) -> int:
@@ -133,6 +137,29 @@ def decrypt(identity_key: bytes, encryptedAndTag: bytes, Sx: bytes, beacon_time_
 
     # Compute m = AES-EAX-256-DEC(k, nonce, m’, tag)
     return decrypt_aes_eax(m_dash, tag, nonce, k)
+
+
+def decrypt_with_counter_search(identity_key: bytes, encryptedAndTag: bytes, Sx: bytes,
+                                reported_counter: int) -> tuple[bytes, int]:
+    """decrypt(), but also tries the neighbouring rotation periods if the
+    counter Google reported doesn't work, since that counter can be off for
+    a whole tracker (seen: a constant +1885s on an InPlay Carbon Finder, with
+    every other tracker on the account exact). A wrong counter can't pass the
+    128-bit EAX tag, so a hit here is always the real plaintext. Returns
+    (plaintext, counter that worked), or raises the reported counter's error."""
+    try:
+        return decrypt(identity_key, encryptedAndTag, Sx, reported_counter), reported_counter
+    except ValueError as reported_error:
+        base = reported_counter - reported_counter % ROTATION_PERIOD
+        for slot in range(1, COUNTER_SEARCH_SLOTS + 1):
+            for candidate in (base - slot * ROTATION_PERIOD, base + slot * ROTATION_PERIOD):
+                if candidate < 0:
+                    continue
+                try:
+                    return decrypt(identity_key, encryptedAndTag, Sx, candidate), candidate
+                except ValueError:
+                    continue
+        raise reported_error
 
 
 if __name__ == "__main__":
