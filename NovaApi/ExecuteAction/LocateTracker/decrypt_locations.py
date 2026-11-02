@@ -11,7 +11,7 @@ import time
 
 from cryptography.exceptions import InvalidTag
 
-from FMDNCrypto.foreign_tracker_cryptor import decrypt
+from FMDNCrypto.foreign_tracker_cryptor import decrypt_with_counter_search
 from KeyBackup.cloud_key_decryptor import decrypt_aes_gcm
 from NovaApi.ExecuteAction.LocateTracker.decrypted_location import WrappedLocation
 from ProtoDecoders import Common_pb2, DeviceUpdate_pb2
@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 _mac_failures_lock = threading.Lock()
 _mac_failure_count = 0
 _mac_failure_window_start = time.time()
+
+# Corrections already logged, so a tracker with a constant error logs it once
+# rather than on every poll.
+_logged_counter_corrections: set[int] = set()
 
 
 def create_map_links(latitude, longitude):
@@ -107,7 +111,11 @@ def decrypt_location_response_locations(device_update_protobuf):
                     decrypted_location = decrypt_aes_gcm(identity_key_hash, encrypted_location)
                 else:
                     time_offset = 0 if is_mcu else loc.geoLocation.deviceTimeOffset
-                    decrypted_location = decrypt(identity_key, encrypted_location, public_key_random, time_offset)
+                    decrypted_location, counter = decrypt_with_counter_search(
+                        identity_key, encrypted_location, public_key_random, time_offset,
+                    )
+                    if counter != time_offset:
+                        _log_counter_correction(counter - time_offset)
             except (ValueError, InvalidTag) as e:
                 # One undecryptable sighting (e.g. one matched to an older EID
                 # upload whose clock base was wrong) shouldn't hide all the
@@ -171,6 +179,12 @@ def decrypt_location_response_locations(device_update_protobuf):
         })
 
     return results
+
+
+def _log_counter_correction(correction: int):
+    if correction not in _logged_counter_corrections:
+        _logged_counter_corrections.add(correction)
+        logger.info("Report only decrypted with its counter corrected by %+ds.", correction)
 
 
 def _log_mac_failure(report_time: int, exc: Exception):
