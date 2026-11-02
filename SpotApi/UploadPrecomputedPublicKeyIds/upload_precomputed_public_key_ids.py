@@ -106,6 +106,24 @@ def refresh_owned_trackers(device_list: DevicesList, drift_slots: int = 2, dry_r
     refresh_custom_trackers above). Returns how many trackers were (or in
     dry_run, would have been) uploaded."""
 
+    request = _owned_trackers_request(device_list, drift_slots, clock_zeros, include_future=True)
+
+    if request.deviceEids and not dry_run:
+        try:
+            spot_request("UploadPrecomputedPublicKeyIds", request.SerializeToString())
+        except RuntimeError as e:
+            # Google has rejected future timestamps with INVALID_ARGUMENT
+            # before, but they're the only thing covering the time until the
+            # next upload, so they're only dropped when it actually refuses.
+            logger.warning("EID upload refused, retrying without upcoming EIDs: %s", e)
+            past_only = _owned_trackers_request(device_list, drift_slots, clock_zeros, include_future=False)
+            spot_request("UploadPrecomputedPublicKeyIds", past_only.SerializeToString())
+
+    return len(request.deviceEids)
+
+
+def _owned_trackers_request(device_list: DevicesList, drift_slots: int, clock_zeros: dict[str, int] | None,
+                            include_future: bool) -> UploadPrecomputedPublicKeyIdsRequest:
     request = UploadPrecomputedPublicKeyIdsRequest()
     start_date = int(time.time() - hours_to_seconds(3))
 
@@ -127,25 +145,22 @@ def refresh_owned_trackers(device_list: DevicesList, drift_slots: int = 2, dry_r
         canonic_id = device.identifierInformation.canonicIds.canonicId[0].id
         raw_clock_zero = (clock_zeros or {}).get(canonic_id, registration.pairDate)
         pair_date = registration.pairDate
-        now = int(time.time())
 
         new_truncated_ids = UploadPrecomputedPublicKeyIdsRequest.DevicePublicKeyIds()
         new_truncated_ids.pairDate = pair_date
         new_truncated_ids.canonicId.id = canonic_id
 
         next_eids = get_rotating_eids(identity_key, raw_clock_zero, pair_date, start_date,
-                                      duration_seconds=max_truncated_eid_seconds_server, drift_slots=drift_slots, now=now)
+                                      duration_seconds=max_truncated_eid_seconds_server, drift_slots=drift_slots,
+                                      now=None if include_future else int(time.time()))
         new_truncated_ids.clientList.publicKeyIdInfo.extend(next_eids)
         request.deviceEids.append(new_truncated_ids)
 
-        logger.info("%s EIDs for %s (clock zero pairDate%+ds, %d entries, first %s)",
-                    "Would upload" if dry_run else "Uploading", name, raw_clock_zero - pair_date,
+        logger.info("Prepared EIDs for %s (clock zero pairDate%+ds, %d entries, first %s)",
+                    name, raw_clock_zero - pair_date,
                     len(next_eids), next_eids[0].publicKeyId.truncatedEid.hex() if next_eids else "-")
 
-    if request.deviceEids and not dry_run:
-        spot_request("UploadPrecomputedPublicKeyIds", request.SerializeToString())
-
-    return len(request.deviceEids)
+    return request
 
 
 def estimate_clock_zero(device_update: DeviceUpdate, identity_key: bytes | None = None) -> int | None:

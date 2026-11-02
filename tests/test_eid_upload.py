@@ -384,3 +384,49 @@ def test_estimate_clock_zero_leaves_out_reports_that_never_decrypt():
     report.publicKeyRandom = generate_eid(EIK, 0)
 
     assert upload.estimate_clock_zero(device_update, EIK) is None
+
+
+def _stub_upload(monkeypatch, responses):
+    sent = []
+
+    def _spot_request(api_scope, payload):
+        request = DeviceUpdate_pb2.UploadPrecomputedPublicKeyIdsRequest()
+        request.ParseFromString(payload)
+        sent.append(request)
+        response = responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+
+    monkeypatch.setattr(upload, "spot_request", _spot_request)
+    monkeypatch.setattr(upload, "retrieve_identity_key", lambda registration: EIK)
+    return sent
+
+
+def _latest_eid_real_time(request, clock_zero):
+    entries = request.deviceEids[0].clientList.publicKeyIdInfo
+    return max(entry.timestamp.seconds for entry in entries) - PAIR_DATE + clock_zero
+
+
+def test_upload_covers_the_time_until_the_next_upload(monkeypatch):
+    device_list = DeviceUpdate_pb2.DevicesList()
+    _device(device_list, "Keys", "tracker-1")
+    clock_zero = int(time.time()) - 100 * ROTATION_PERIOD
+    sent = _stub_upload(monkeypatch, [None])
+
+    assert upload.refresh_owned_trackers(device_list, clock_zeros={"tracker-1": clock_zero}) == 1
+
+    assert len(sent) == 1
+    assert _latest_eid_real_time(sent[0], clock_zero) > time.time() + config.EID_UPLOAD_INTERVAL_S
+
+
+def test_upload_drops_upcoming_eids_only_if_refused(monkeypatch):
+    device_list = DeviceUpdate_pb2.DevicesList()
+    _device(device_list, "Keys", "tracker-1")
+    clock_zero = int(time.time()) - 100 * ROTATION_PERIOD
+    sent = _stub_upload(monkeypatch, [RuntimeError("failed with 400: INVALID_ARGUMENT"), None])
+
+    assert upload.refresh_owned_trackers(device_list, drift_slots=0, clock_zeros={"tracker-1": clock_zero}) == 1
+
+    assert len(sent) == 2
+    assert _latest_eid_real_time(sent[0], clock_zero) > time.time()
+    assert _latest_eid_real_time(sent[1], clock_zero) <= time.time()
