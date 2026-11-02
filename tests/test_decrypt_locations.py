@@ -116,3 +116,22 @@ def test_report_outside_the_counter_search_still_fails(monkeypatch):
 
     with pytest.raises(ValueError):
         decrypt_location_response_locations(_real_report_update(identity_key, 6661120, 6661120 + 10 * 1024))
+
+
+def test_counter_correction_is_logged_once_per_tracker(monkeypatch, caplog):
+    import NovaApi.ExecuteAction.LocateTracker.decrypt_locations as decrypt_locations
+
+    identity_key = bytes(range(32))
+    monkeypatch.setattr(decrypt_locations, "retrieve_identity_key", lambda registration: identity_key)
+    monkeypatch.setattr(decrypt_locations, "_logged_counter_corrections", set())
+    update = _real_report_update(identity_key, 6661120, 6663005)
+
+    with caplog.at_level("INFO", logger=decrypt_locations.__name__):
+        for name in ("Wallet", "Wallet", "Bag"):
+            decrypt_location_response_locations(update, name)
+
+    corrections = [r.getMessage() for r in caplog.records if "corrected by" in r.getMessage()]
+    assert corrections == [
+        "Report for Wallet only decrypted with its counter corrected by -1885s.",
+        "Report for Bag only decrypted with its counter corrected by -1885s.",
+    ]

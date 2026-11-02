@@ -84,7 +84,7 @@ def get_location_data_for_device(canonic_device_id, name, timeout: float = 60, c
             capture["device_update_text"] = text_format.MessageToString(
                 result, message_formatter=custom_message_formatter,
             )
-        return decrypt_location_response_locations(result)
+        return decrypt_location_response_locations(result, name)
     finally:
         receiver.unregister_callback(handle_location_response)
 

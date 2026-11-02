@@ -27,7 +27,7 @@ _mac_failure_window_start = time.time()
 
 # Corrections already logged, so a tracker with a constant error logs it once
 # rather than on every poll.
-_logged_counter_corrections: set[int] = set()
+_logged_counter_corrections: set[tuple[str, int]] = set()
 
 
 def create_map_links(latitude, longitude):
@@ -66,7 +66,7 @@ def _status_name(status_value):
         return f"STATUS_UNKNOWN_{status_value}"
 
 
-def decrypt_location_response_locations(device_update_protobuf):
+def decrypt_location_response_locations(device_update_protobuf, name="tracker"):
 
     device_registration = device_update_protobuf.deviceMetadata.information.deviceRegistration
 
@@ -115,7 +115,7 @@ def decrypt_location_response_locations(device_update_protobuf):
                         identity_key, encrypted_location, public_key_random, time_offset,
                     )
                     if counter != time_offset:
-                        _log_counter_correction(counter - time_offset)
+                        _log_counter_correction(name, counter - time_offset)
             except (ValueError, InvalidTag) as e:
                 # One undecryptable sighting (e.g. one matched to an older EID
                 # upload whose clock base was wrong) shouldn't hide all the
@@ -181,10 +181,10 @@ def decrypt_location_response_locations(device_update_protobuf):
     return results
 
 
-def _log_counter_correction(correction: int):
-    if correction not in _logged_counter_corrections:
-        _logged_counter_corrections.add(correction)
-        logger.info("Report only decrypted with its counter corrected by %+ds.", correction)
+def _log_counter_correction(name: str, correction: int):
+    if (name, correction) not in _logged_counter_corrections:
+        _logged_counter_corrections.add((name, correction))
+        logger.info("Report for %s only decrypted with its counter corrected by %+ds.", name, correction)
 
 
 def _log_mac_failure(report_time: int, exc: Exception):
