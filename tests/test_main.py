@@ -359,3 +359,11 @@ async def test_lifespan_calls_browser_shutdown(monkeypatch):
         pass
     
     mock_shutdown.assert_called_once()
+
+
+def test_httpx_request_urls_stay_out_of_the_logs():
+    import logging
+
+    import webui.main  # noqa: F401
+
+    assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)

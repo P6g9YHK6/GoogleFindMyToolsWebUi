@@ -48,6 +48,9 @@ from webui.routers import (
 # they replaced used to. Set up before uvicorn's own dictConfig runs (this
 # module is imported first), so it doesn't get skipped as a no-op.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+# httpx logs every request's full URL at INFO, and a forwarding URL can carry
+# an access token and the coordinates being forwarded.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 BASE_DIR = pathlib.Path(__file__).parent
 
