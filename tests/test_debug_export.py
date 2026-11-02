@@ -51,7 +51,7 @@ def _stub_device_list_and_locate(monkeypatch, locations=None, locate_capture=Non
         lambda device_list: [{"canonic_id": FAKE_CANONIC_ID, "name": FAKE_DEVICE_NAME}],
     )
 
-    async def fake_locate(canonic_id, name, timeout=None):
+    async def fake_locate(canonic_id, name, timeout=None, capture=None):
         return (
             locations if locations is not None else [{"latitude": 1.0, "longitude": 2.0}],
             locate_capture if locate_capture is not None else {"raw_hex": "cafebabe", "device_update_text": "dump"},
@@ -159,7 +159,7 @@ def test_debug_export_one_device_failing_does_not_abort_export(client, monkeypat
         lambda device_list: [{"canonic_id": FAKE_CANONIC_ID, "name": FAKE_DEVICE_NAME}],
     )
 
-    async def boom(canonic_id, name, timeout=None):
+    async def boom(canonic_id, name, timeout=None, capture=None):
         raise RuntimeError("decrypt failed")
 
     monkeypatch.setattr(debug_export, "locate_device_with_capture", boom)
@@ -170,6 +170,37 @@ def test_debug_export_one_device_failing_does_not_abort_export(client, monkeypat
     status = json.loads(files[f"locate/{FAKE_CANONIC_ID}/status.json"])
     assert status["outcome"] == "error"
     assert "decrypt failed" in status["error"]
+
+
+def _stub_locate_failing_after_capture(monkeypatch):
+    debug_export = _stub_device_list_and_locate(monkeypatch)
+
+    async def fail_after_capture(canonic_id, name, timeout=None, capture=None):
+        capture.update({"raw_hex": "cafebabe", "device_update_text": "dump"})
+        raise ValueError("MAC check failed")
+
+    monkeypatch.setattr(debug_export, "locate_device_with_capture", fail_after_capture)
+
+
+def test_debug_export_keeps_raw_response_when_decrypt_fails(client, monkeypatch):
+    _stub_locate_failing_after_capture(monkeypatch)
+
+    resp = client.post("/auth/debug-export", data=_LIVE)
+    assert resp.status_code == 200
+    files = _archive_extract(resp.content)
+    assert json.loads(files[f"locate/{FAKE_CANONIC_ID}/status.json"])["error"] == "MAC check failed"
+    assert files[f"locate/{FAKE_CANONIC_ID}/raw_hex.txt"] == b"cafebabe"
+    assert files[f"locate/{FAKE_CANONIC_ID}/protobuf_text.txt"] == b"dump"
+
+
+def test_debug_export_anonymize_omits_raw_response_when_decrypt_fails(client, monkeypatch):
+    _stub_locate_failing_after_capture(monkeypatch)
+
+    resp = client.post("/auth/debug-export", data={**_LIVE, "anonymize_locations": "true"})
+    assert resp.status_code == 200
+    names = _archive_names(resp.content)
+    assert f"locate/{FAKE_CANONIC_ID}/raw_hex.txt" not in names
+    assert f"locate/{FAKE_CANONIC_ID}/protobuf_text.txt" not in names
 
 
 def test_debug_export_password_encrypts_the_archive(client, monkeypatch):

@@ -96,12 +96,18 @@ async def _locate_all(devices: list[dict]) -> dict[str, dict]:
     async def _one(device: dict) -> tuple[str, dict]:
         canonic_id = device["canonic_id"]
         name = device.get("name") or canonic_id
+        # Passed in rather than only taken from the return value, so the raw
+        # response survives a failed decrypt - exactly the case this export
+        # is most needed for.
+        capture: dict = {}
         try:
-            locations, capture = await locate_device_with_capture(canonic_id, name, timeout=config.LOCATE_TIMEOUT_S)
+            locations, capture = await locate_device_with_capture(
+                canonic_id, name, timeout=config.LOCATE_TIMEOUT_S, capture=capture,
+            )
             outcome = "timeout" if capture.get("timed_out") else "ok"
             return canonic_id, {"outcome": outcome, "locations": locations, **capture}
         except Exception as e:
-            return canonic_id, {"outcome": "error", "error": str(e)}
+            return canonic_id, {"outcome": "error", "error": str(e), **capture}
 
     if not devices:
         return {}
