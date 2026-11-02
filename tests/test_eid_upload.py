@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from FMDNCrypto.eid_generator import ROTATION_PERIOD, generate_eid
 from ProtoDecoders import DeviceUpdate_pb2
@@ -304,3 +305,58 @@ def test_upload_once_calibrates_from_raw_reports_when_decryption_fails(monkeypat
 
     assert asyncio.run(eid_upload.upload_once(dry_run=True)) == 1
     assert received == {"tracker-1": PAIR_DATE + 2000 - ROTATION_PERIOD - ROTATION_PERIOD // 2}
+
+
+def _stub_clock_store(monkeypatch, entry):
+    devices = {"tracker-1": {"clock_zero": entry} if entry else {}}
+    monkeypatch.setattr(eid_upload, "load", lambda: {"devices": devices})
+
+    def _mutate(canonic_id, fn):
+        fn(devices[canonic_id])
+
+    monkeypatch.setattr(eid_upload, "mutate_device", _mutate)
+    return devices
+
+
+def test_clock_zero_reused_while_fresh_without_restarting_its_ttl(monkeypatch):
+    saved_at = int(time.time()) - 3600
+    devices = _stub_clock_store(monkeypatch, {"clock_zero": 123, "saved_at": saved_at})
+
+    async def _locate(*args, **kwargs):
+        raise AssertionError("a fresh clock zero shouldn't need a locate")
+
+    monkeypatch.setattr(eid_upload, "locate_device_with_capture", _locate)
+
+    assert asyncio.run(eid_upload._clock_zero("tracker-1", "Keys")) == 123
+    assert devices["tracker-1"]["clock_zero"]["saved_at"] == saved_at
+
+
+def test_clock_zero_recalibrated_once_expired(monkeypatch):
+    expired = int(time.time()) - eid_upload.CLOCK_ZERO_TTL_S - 1
+    devices = _stub_clock_store(monkeypatch, {"clock_zero": 123, "saved_at": expired})
+    raw = _device_update([(PAIR_DATE + 2000, ROTATION_PERIOD)]).SerializeToString().hex()
+
+    async def _locate(canonic_id, name, timeout, capture):
+        capture["raw_hex"] = raw
+        return [], capture
+
+    monkeypatch.setattr(eid_upload, "locate_device_with_capture", _locate)
+
+    expected = PAIR_DATE + 2000 - ROTATION_PERIOD - ROTATION_PERIOD // 2
+    assert asyncio.run(eid_upload._clock_zero("tracker-1", "Keys")) == expected
+    assert devices["tracker-1"]["clock_zero"]["clock_zero"] == expected
+    assert devices["tracker-1"]["clock_zero"]["saved_at"] > expired
+
+
+def test_clock_zero_keeps_expired_value_when_recalibration_fails(monkeypatch):
+    expired = int(time.time()) - eid_upload.CLOCK_ZERO_TTL_S - 1
+    devices = _stub_clock_store(monkeypatch, {"clock_zero": 123, "saved_at": expired})
+
+    async def _locate(canonic_id, name, timeout, capture):
+        capture["timed_out"] = True
+        return [], capture
+
+    monkeypatch.setattr(eid_upload, "locate_device_with_capture", _locate)
+
+    assert asyncio.run(eid_upload._clock_zero("tracker-1", "Keys")) == 123
+    assert devices["tracker-1"]["clock_zero"]["saved_at"] == expired

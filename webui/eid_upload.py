@@ -14,7 +14,7 @@ some trackers.
 
 Clock zeros are persisted per-device in devices.yaml (under the "clock_zero"
 sub-key) to survive restarts and avoid re-locating on every deploy.
-Only re-calibrated if >24h old or tracker reports changed.
+Re-calibrated once they're >24h old, keeping the old value if that fails.
 """
 
 import asyncio
@@ -59,12 +59,14 @@ async def _clock_zero(canonic_id: str, name: str) -> int | None:
     # Check persisted clock zero first (if < 24h old)
     now = time.time()
     persisted = _get_persisted_clock_zero(canonic_id)
+    stale = None
     if persisted:
         clock_zero, saved_at = persisted
         if now - saved_at < CLOCK_ZERO_TTL_S:
             logger.debug("Using persisted clock zero for %s: %d (saved %ds ago)", name, clock_zero, int(now - saved_at))
             return clock_zero
         logger.debug("Persisted clock zero for %s expired (%ds old), re-calibrating", name, int(now - saved_at))
+        stale = clock_zero
 
     # The raw response is captured before decryption, so a tracker whose
     # current reports still fail their MAC check can be calibrated from it
@@ -76,12 +78,19 @@ async def _clock_zero(canonic_id: str, name: str) -> int | None:
         )
     except Exception as e:
         if "raw_hex" not in capture:
-            logger.info("Couldn't locate %s to calibrate its clock, using pairDate: %s", name, e)
-            return None
+            logger.info("Couldn't locate %s to calibrate its clock: %s", name, e)
+            return stale
         logger.info("Reports for %s didn't decrypt, calibrating from the raw response: %s", name, e)
     if "raw_hex" not in capture:
-        return None
-    return estimate_clock_zero(parse_device_update_protobuf(capture["raw_hex"]))
+        return stale
+    estimate = estimate_clock_zero(parse_device_update_protobuf(capture["raw_hex"]))
+    if estimate is None:
+        return stale
+    # Only a fresh estimate restarts the TTL, or it would never expire.
+    mutate_device(canonic_id, lambda entry: entry.setdefault("clock_zero", {}).update(
+        {"clock_zero": estimate, "saved_at": int(time.time())}
+    ))
+    return estimate
 
 
 async def upload_once(dry_run: bool) -> int:
@@ -108,12 +117,6 @@ async def upload_once(dry_run: bool) -> int:
         zero = await _clock_zero(canonic_id, name)
         if zero is not None:
             clock_zeros[canonic_id] = zero
-
-    # Persist updated clock zeros
-    for canonic_id, clock_zero in clock_zeros.items():
-        mutate_device(canonic_id, lambda entry: entry.setdefault("clock_zero", {}).update(
-            {"clock_zero": clock_zero, "saved_at": int(time.time())}
-        ))
 
     return await run_blocking(
         refresh_owned_trackers, device_list,
