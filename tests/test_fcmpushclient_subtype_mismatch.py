@@ -72,3 +72,28 @@ def test_multi_param_headers_are_trimmed_to_just_the_value_we_want(monkeypatch):
 
     assert captured["crypto_key"] == "REALDHVALUE"
     assert captured["salt"] == "REALSALTVALUE"
+
+
+def test_header_params_are_found_by_name_not_position(monkeypatch):
+    """A leading p256ecdsa= used to be sliced as if it were dh=, so the
+    wrong key went into the decode and failed with "Invalid EC key"."""
+    client = _make_client(app_id="our-real-app-id")
+
+    captured = {}
+
+    def fake_decrypt(credentials, crypto_key, salt, raw_data):
+        captured["crypto_key"] = crypto_key
+        captured["salt"] = salt
+        return b"{}"
+
+    monkeypatch.setattr(FcmPushClient, "_decrypt_raw_data", staticmethod(fake_decrypt))
+
+    msg = DataMessageStanza()
+    msg.app_data.append(AppData(key="subtype", value="our-real-app-id"))
+    msg.app_data.append(AppData(key="crypto-key", value="p256ecdsa=OTHERKEY=; dh=REALDHVALUE="))
+    msg.app_data.append(AppData(key="encryption", value="rs=4096,salt=REALSALTVALUE"))
+
+    client._handle_data_message(msg)
+
+    assert captured["crypto_key"] == "REALDHVALUE="
+    assert captured["salt"] == "REALSALTVALUE"
