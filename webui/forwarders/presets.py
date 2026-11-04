@@ -64,14 +64,13 @@ PRESETS: dict[str, dict] = {
         "label": "Home Assistant (OwnTracks integration)",
         "hint": (
             "Home Assistant's OwnTracks integration: replace the URL with the webhook URL it gave you when you set it "
-            "up. No login needed, that URL is the secret. The tracker shows up as "
-            "device_tracker.<X-Limit-U>_<X-Limit-D>, so X-Limit-U is only a name prefix here, not a Home Assistant "
-            "user. Home Assistant ignores any fix with an accuracy of 0, which is the default for a named-location "
+            "up. No login needed, that URL is the secret. X-Limit-U isn't a Home Assistant user: it's the name the "
+            "tracker shows up under, and the entity is device_tracker.<X-Limit-U>_<X-Limit-D>. Home Assistant ignores any fix with an accuracy of 0, which is the default for a named-location "
             "reading, so set an accuracy on its semantic location mapping for those to reach it."
         ),
         "method": "POST",
         "url": "https://homeassistant.local:8123/api/webhook/REPLACE_WITH_YOUR_WEBHOOK_ID",
-        "headers": {"X-Limit-U": "gfmt", "X-Limit-D": "{{device_alias}}"},
+        "headers": {"X-Limit-U": "{{device_alias}}", "X-Limit-D": "{{device_alias}}"},
         "body_type": "json",
         "body": _OWNTRACKS_BODY,
     },

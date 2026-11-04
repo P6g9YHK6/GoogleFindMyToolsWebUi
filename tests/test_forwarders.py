@@ -92,6 +92,12 @@ def test_owntracks_presets_send_what_their_receiver_reads(key, url_path):
     assert rendered == {"_type": "location", "lat": 47.1, "lon": 8.5, "tst": 1700000000, "acc": 10.0}
 
 
+def test_owntracks_home_assistant_preset_names_each_tracker_after_its_alias():
+    """Home Assistant labels the tracker with X-Limit-U, so a fixed value there
+    would show every tracker under the same name."""
+    assert PRESETS["owntracks_home_assistant"]["headers"]["X-Limit-U"] == "{{device_alias}}"
+
+
 def test_traccar_preset_renders_a_parseable_url_for_a_named_location_with_no_altitude():
     """A semantic-map-mapped SEMANTIC reading (see semantic_map.py) has
     coordinates but no altitude. The rendered URL must not contain the
