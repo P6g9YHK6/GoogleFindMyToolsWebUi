@@ -1,5 +1,6 @@
 """Tests for webui/forwarders/custom.py - generic HTTP forwarder."""
 
+import httpx
 import pytest
 
 from webui.forwarders import custom
@@ -285,3 +286,23 @@ def test_preview_request_body_type_none():
         {"latitude": 1}
     )
     assert result["body"] == ""
+
+
+def test_forward_to_custom_sends_a_non_ascii_header_as_utf8(monkeypatch):
+    """A header templated from a tracker's name mustn't raise before sending."""
+    received = {}
+
+    def handler(request):
+        received["headers"] = request.headers.raw
+        return httpx.Response(200)
+
+    def request_via_mock(method, url, **kwargs):
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            return client.request(method, url, **kwargs)
+
+    monkeypatch.setattr(custom.httpx, "request", request_via_mock)
+    assert custom.forward_to_custom(
+        {"method": "POST", "url": "http://x/", "headers": {"X-Limit-D": "{{device_alias}}"}},
+        {"latitude": 1.0, "longitude": 2.0}, device_alias="Clés",
+    ) is True
+    assert (b"X-Limit-D", "Clés".encode()) in received["headers"]
