@@ -92,7 +92,7 @@ Everything about *where* a location goes, separate from *when* (that's
 - `custom.py` - the one generic HTTP request builder every endpoint sends
   through (method/URL/headers/params/body, all with `{{variable}}`
   templating).
-- `presets.py` - Traccar/Nextcloud PhoneTrack/Custom are just presets that
+- `presets.py` - Traccar/Nextcloud PhoneTrack/OwnTracks/Custom are just presets that
   pre-fill the generic builder above, not separate code paths.
 - `log_store.py` - the Forwarding Log: every attempt, its target, status,
   and payload.

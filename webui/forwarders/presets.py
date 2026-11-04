@@ -15,6 +15,14 @@ entry below.
 
 from webui.forwarders.custom import NAMED_DEVICE_META_KEYS
 
+# Shared by the two OwnTracks presets below. No "alt": {{altitude_m}} is blank
+# on a named-location reading, which would make this invalid JSON - and Home
+# Assistant answers 200 to that while dropping the point, so it'd fail silently.
+_OWNTRACKS_BODY = (
+    '{"_type": "location", "lat": {{latitude}}, "lon": {{longitude}}, '
+    '"tst": {{google_timestamp}}, "acc": {{accuracy_m}}}'
+)
+
 PRESETS: dict[str, dict] = {
     "custom": {
         "label": "Custom",
@@ -39,6 +47,33 @@ PRESETS: dict[str, dict] = {
         "headers": {},
         "body_type": "none",
         "body": "",
+    },
+    "owntracks_recorder": {
+        "label": "OwnTracks Recorder",
+        "hint": (
+            "OwnTracks Recorder's HTTP endpoint: a POST with a JSON body, the user and device go in the "
+            "X-Limit-U/X-Limit-D headers. Replace REPLACE_WITH_YOUR_USERNAME with the user to record this under."
+        ),
+        "method": "POST",
+        "url": "http://owntracks.local:8083/pub",
+        "headers": {"X-Limit-U": "REPLACE_WITH_YOUR_USERNAME", "X-Limit-D": "{{device_alias}}"},
+        "body_type": "json",
+        "body": _OWNTRACKS_BODY,
+    },
+    "owntracks_home_assistant": {
+        "label": "Home Assistant (OwnTracks integration)",
+        "hint": (
+            "Home Assistant's OwnTracks integration: replace the URL with the webhook URL it gave you when you set it "
+            "up. No login needed, that URL is the secret. The tracker shows up as "
+            "device_tracker.<X-Limit-U>_<X-Limit-D>, so X-Limit-U is only a name prefix here, not a Home Assistant "
+            "user. Home Assistant ignores any fix with an accuracy of 0, which is the default for a named-location "
+            "reading, so set an accuracy on its semantic location mapping for those to reach it."
+        ),
+        "method": "POST",
+        "url": "https://homeassistant.local:8123/api/webhook/REPLACE_WITH_YOUR_WEBHOOK_ID",
+        "headers": {"X-Limit-U": "gfmt", "X-Limit-D": "{{device_alias}}"},
+        "body_type": "json",
+        "body": _OWNTRACKS_BODY,
     },
     "phonetrack": {
         "label": "Nextcloud PhoneTrack",
