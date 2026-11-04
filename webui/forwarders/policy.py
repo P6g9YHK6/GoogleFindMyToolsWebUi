@@ -128,7 +128,8 @@ def _skip_not_own_report(endpoint_cfg: dict, location: dict) -> bool:
 def _skip_inaccurate(endpoint_cfg: dict, location: dict) -> bool:
     """Google's own accuracy_m radius exceeds the configured threshold.
     Always bypassed for a semantic reading - accuracy is hardcoded 0 for
-    those at decode time, so it's never a real signal there."""
+    those at decode time, or whatever its mapping sets, so it's never a real
+    signal there."""
     if not endpoint_cfg.get("skip_if_inaccurate"):
         return False
     if location.get("is_semantic") or location.get("accuracy") is None:

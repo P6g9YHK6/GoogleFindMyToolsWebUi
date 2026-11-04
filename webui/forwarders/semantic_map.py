@@ -48,6 +48,8 @@ def apply_semantic_mapping(locations: list[dict], mapping: dict) -> list[dict]:
             # Optional - a mapping entry saved before this field existed (or
             # one left blank) has no altitude, same as before.
             "altitude": coords.get("altitude"),
+            # Same for accuracy - keeps the 0 a semantic reading decodes with.
+            "accuracy": coords.get("accuracy", location.get("accuracy")),
             "map_links": create_map_links(latitude, longitude),
         })
     return mapped

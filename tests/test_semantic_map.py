@@ -160,3 +160,15 @@ def test_full_match_mode_still_requires_matching_case():
     [result] = semantic_map.apply_semantic_mapping([location], mapping)
 
     assert result is location
+
+
+def test_mapped_accuracy_replaces_the_decoded_0():
+    mapping = {"Home": {"latitude": 45.0, "longitude": 9.0, "accuracy": 25.0}}
+    [result] = semantic_map.apply_semantic_mapping([_semantic("Home")], mapping)
+    assert result["accuracy"] == 25.0
+
+
+def test_mapped_accuracy_of_0_stays_0():
+    mapping = {"Home": {"latitude": 45.0, "longitude": 9.0, "accuracy": 0.0}}
+    [result] = semantic_map.apply_semantic_mapping([_semantic("Home")], mapping)
+    assert result["accuracy"] == 0.0

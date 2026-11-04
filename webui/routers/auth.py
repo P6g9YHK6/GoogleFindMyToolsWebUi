@@ -15,14 +15,25 @@ from webui.templating import templates
 _SEMANTIC_MATCH_MODES = ("full", "partial")
 
 
+def _to_semantic_accuracy(value) -> float:
+    """A mapping's optional accuracy, in meters - blank/missing is 0, the same
+    value a named-location reading already decodes with. Raises on anything
+    that isn't a finite, non-negative number."""
+    accuracy = float(value or 0)
+    if not 0 <= accuracy < float("inf"):
+        raise ValueError("accuracy must be a non-negative number")
+    return accuracy
+
+
 def _to_semantic_map(value) -> dict:
     """Used as an _APP_SETTINGS_SCHEMA caster for the YAML-edit path - see
     _parse_semantic_map_form for the structured-form equivalent. Expects
     {name: {"latitude": ..., "longitude": ..., "altitude": ...,
-    "match_mode": "full"|"partial"}}; raises (caught by
+    "accuracy": ..., "match_mode": "full"|"partial"}}; raises (caught by
     _validate_app_settings, same as every other caster here) on anything
     else, including a name with no coordinates/altitude, a non-numeric one,
-    or an unrecognized match_mode. match_mode defaults to "full"."""
+    a negative accuracy, or an unrecognized match_mode. accuracy defaults to
+    0, match_mode to "full"."""
     if not isinstance(value, dict):
         raise TypeError("not a mapping")
     result = {}
@@ -40,6 +51,7 @@ def _to_semantic_map(value) -> dict:
             "latitude": float(coords["latitude"]),
             "longitude": float(coords["longitude"]),
             "altitude": float(coords["altitude"]),
+            "accuracy": _to_semantic_accuracy(coords.get("accuracy")),
             "match_mode": match_mode,
         }
     return result
@@ -48,7 +60,7 @@ def _to_semantic_map(value) -> dict:
 def _parse_semantic_map_form(form) -> dict:
     """Structured-form equivalent of _to_semantic_map above - reads the
     semantic_name[]/semantic_lat[]/semantic_lon[]/semantic_alt[]/
-    semantic_match_mode[] quintuples posted by the "Semantic location
+    semantic_accuracy[]/semantic_match_mode[] rows posted by the "Semantic location
     mapping" table (see auth/_app_settings.html), same parallel-list
     convention as webui/forwarders/settings_service.py's parse_kv_rows for
     endpoint headers. A row with a blank name or a non-numeric lat/lon is
@@ -57,22 +69,29 @@ def _parse_semantic_map_form(form) -> dict:
     field gets elsewhere on this form. An unrecognized/missing match_mode
     falls back to "full" instead of dropping the row - coordinates are what
     make a row valid, not the match type. A blank/non-numeric altitude drops
-    the row too, same as a blank/non-numeric latitude or longitude."""
+    the row too, same as a blank/non-numeric latitude or longitude. A blank
+    or invalid accuracy falls back to 0 instead, same reasoning as match_mode."""
     names = form.getlist("semantic_name")
     lats = form.getlist("semantic_lat")
     lons = form.getlist("semantic_lon")
     alts = form.getlist("semantic_alt")
+    accuracies = form.getlist("semantic_accuracy")
     match_modes = form.getlist("semantic_match_mode")
     result = {}
-    for name, lat, lon, alt, match_mode in zip_longest(names, lats, lons, alts, match_modes, fillvalue=""):
+    for name, lat, lon, alt, accuracy, match_mode in zip_longest(names, lats, lons, alts, accuracies, match_modes, fillvalue=""):
         name = name.strip()
         if not name:
             continue
+        try:
+            accuracy = _to_semantic_accuracy(accuracy)
+        except ValueError:
+            accuracy = 0.0
         try:
             entry = {
                 "latitude": float(lat),
                 "longitude": float(lon),
                 "altitude": float(alt),
+                "accuracy": accuracy,
                 "match_mode": match_mode if match_mode in _SEMANTIC_MATCH_MODES else "full",
             }
         except (TypeError, ValueError):
