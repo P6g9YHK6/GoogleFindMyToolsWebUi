@@ -1801,11 +1801,16 @@ details ul {
   min-width: 8rem;
 }
 
+/* Full column width (a bare textarea defaults to ~20 cols), and grows with
+   its content the same way .url-autosize does - see endpoint_fields.js. */
 .body-textarea {
+  display: block;
+  width: 100%;
   font-family: var(--font-mono);
   font-size: 0.85rem;
   min-height: 6rem;
-  resize: vertical;
+  resize: none;
+  overflow: hidden;
 }
 
 /* Variable chips */

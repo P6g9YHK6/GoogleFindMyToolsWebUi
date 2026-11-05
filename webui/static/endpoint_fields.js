@@ -73,7 +73,7 @@
   }
 
   function autosizeAll(scope) {
-    (scope || document).querySelectorAll(".url-autosize").forEach(autosizeUrlField);
+    (scope || document).querySelectorAll(".url-autosize, .body-textarea").forEach(autosizeUrlField);
   }
 
   // ---- key/value rows (headers) ------------------------------------------
@@ -141,6 +141,7 @@
     const body = block.querySelector(".body-textarea");
     if (!bodyType || !body) return;
     body.style.display = bodyType.value === "none" ? "none" : "";
+    autosizeUrlField(body);
   }
 
   // ---- toggle-gated fields --------------------------------------------
@@ -450,7 +451,7 @@
   });
 
   document.addEventListener("input", (event) => {
-    if (event.target.classList.contains("url-autosize")) autosizeUrlField(event.target);
+    if (event.target.matches(".url-autosize, .body-textarea")) autosizeUrlField(event.target);
     const block = event.target.closest(".endpoint-block");
     if (block) {
       if (event.target.classList.contains("endpoint-alias")) {
