@@ -143,7 +143,7 @@ def test_app_settings_semantic_location_map_round_trips(client, tmp_path, monkey
         saved = settings_store.load()
         assert saved["semantic_location_map"] == {
             "Nest Mini - Living Room": {
-                "latitude": 45.0, "longitude": 9.0, "altitude": 120.0, "match_mode": "partial",
+                "latitude": 45.0, "longitude": 9.0, "altitude": 120.0, "accuracy": 0.0, "match_mode": "partial",
             },
         }
 
@@ -176,10 +176,50 @@ def test_app_settings_semantic_location_map_defaults_match_mode_to_full(client, 
         })
         assert resp.status_code == 200
         assert settings_store.load()["semantic_location_map"] == {
-            "Home": {"latitude": 1.0, "longitude": 2.0, "altitude": 5.0, "match_mode": "full"},
+            "Home": {"latitude": 1.0, "longitude": 2.0, "altitude": 5.0, "accuracy": 0.0, "match_mode": "full"},
         }
     finally:
         _remove_apprise_handlers()
+
+
+def test_app_settings_semantic_location_map_saves_accuracy_and_falls_back_to_0(client, tmp_path, monkeypatch):
+    """Accuracy is optional: blank or invalid keeps the row, at 0."""
+    from webui import config, settings_store
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "APP_SETTINGS_PATH", tmp_path / "config.yaml")
+    _stub_apprise(monkeypatch)
+
+    try:
+        resp = client.post("/auth/settings", data={
+            "query_throttle_max": "5", "query_throttle_window_s": "30", "query_min_spread_s": "0.5",
+            "apprise_urls": "", "apprise_notify_level": "WARNING",
+            "semantic_name": ["Set", "Blank", "Negative"],
+            "semantic_lat": ["1.0", "1.0", "1.0"],
+            "semantic_lon": ["2.0", "2.0", "2.0"],
+            "semantic_alt": ["5.0", "5.0", "5.0"],
+            "semantic_accuracy": ["25.5", "", "-1"],
+        })
+        assert resp.status_code == 200
+        saved = settings_store.load()["semantic_location_map"]
+        assert {name: entry["accuracy"] for name, entry in saved.items()} == {"Set": 25.5, "Blank": 0.0, "Negative": 0.0}
+        assert 'name="semantic_accuracy" value="25.5"' in client.get("/auth").text
+    finally:
+        _remove_apprise_handlers()
+
+
+def test_to_semantic_map_keeps_accuracy_and_rejects_a_bad_one():
+    """The YAML path: unlike the form, a bad value here is an error to show."""
+    import pytest
+
+    from webui.routers.auth import _to_semantic_map
+
+    base ={"latitude": 1.0, "longitude": 2.0, "altitude": 5.0}
+    assert _to_semantic_map({"Home": {**base, "accuracy": 25}})["Home"]["accuracy"] == 25.0
+    assert _to_semantic_map({"Home": base})["Home"]["accuracy"] == 0.0
+    for bad in (-1, "not-a-number", float("nan"), float("inf")):
+        with pytest.raises(ValueError):
+            _to_semantic_map({"Home": {**base, "accuracy": bad}})
 
 
 def test_app_settings_semantic_location_map_requires_altitude(client, tmp_path, monkeypatch):
@@ -320,7 +360,7 @@ def test_save_app_settings_yaml_persists_a_semantic_location_map(client, tmp_pat
         saved = settings_store.load()
         # No match_mode in the posted YAML - defaults to "full".
         assert saved["semantic_location_map"] == {
-            "Nest Mini - Living Room": {"latitude": 45.0, "longitude": 9.0, "altitude": 120.0, "match_mode": "full"},
+            "Nest Mini - Living Room": {"latitude": 45.0, "longitude": 9.0, "altitude": 120.0, "accuracy": 0.0, "match_mode": "full"},
         }
     finally:
         _remove_apprise_handlers()
@@ -352,7 +392,7 @@ def test_save_app_settings_yaml_persists_a_partial_match_semantic_location_map(c
 
         saved = settings_store.load()
         assert saved["semantic_location_map"] == {
-            "Living Room": {"latitude": 45.0, "longitude": 9.0, "altitude": 120.0, "match_mode": "partial"},
+            "Living Room": {"latitude": 45.0, "longitude": 9.0, "altitude": 120.0, "accuracy": 0.0, "match_mode": "partial"},
         }
     finally:
         _remove_apprise_handlers()
@@ -384,7 +424,7 @@ def test_save_app_settings_yaml_persists_a_semantic_location_map_altitude(client
         saved = settings_store.load()
         assert saved["semantic_location_map"] == {
             "Nest Mini - Living Room": {
-                "latitude": 45.0, "longitude": 9.0, "altitude": 120.0, "match_mode": "full",
+                "latitude": 45.0, "longitude": 9.0, "altitude": 120.0, "accuracy": 0.0, "match_mode": "full",
             },
         }
     finally:

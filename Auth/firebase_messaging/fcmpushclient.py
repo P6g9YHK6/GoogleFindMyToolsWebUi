@@ -31,6 +31,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import ssl
 import struct
 import time
@@ -431,6 +432,14 @@ class FcmPushClient:  # pylint:disable=too-many-instance-attributes
         )
         return decrypted
 
+    @staticmethod
+    def _header_param(header: str, name: str) -> str:
+        for param in re.split("[;,]", header):
+            key, _, value = param.partition("=")
+            if key.strip().lower() == name:
+                return value.strip()
+        raise ValueError(f"no {name} parameter in header")
+
     def _app_data_by_key(
         self, p: DataMessageStanza, key: str, do_not_raise: bool = False
     ) -> str:
@@ -459,16 +468,7 @@ class FcmPushClient:  # pylint:disable=too-many-instance-attributes
         ):
             # The deleted_messages message does not contain data.
             return
-        # Both headers can carry more than one ;-separated parameter (e.g.
-        # "dh=<point>;p256ecdsa=<other key>") - take only the value for the
-        # parameter we actually want. Keeping the rest used to decode into
-        # one garbage-length blob instead of raising (base64 silently drops
-        # the stray ";"/"=" characters from the second parameter rather than
-        # erroring on them), which then failed EC point validation with a
-        # confusing "Invalid EC key" deep inside http_ece.
-        crypto_key = self._app_data_by_key(msg, "crypto-key")[3:].split(";")[0]  # strip dh=
-        salt = self._app_data_by_key(msg, "encryption")[5:].split(";")[0]  # strip salt=
-        subtype = self._app_data_by_key(msg, "subtype")
+        subtype = self._app_data_by_key(msg, "subtype", do_not_raise=True)
         if TYPE_CHECKING:
             assert self.credentials
         if subtype != self.credentials["gcm"]["app_id"]:
@@ -487,9 +487,32 @@ class FcmPushClient:  # pylint:disable=too-many-instance-attributes
             return
         if not self.credentials:
             return
-        decrypted = self._decrypt_raw_data(
-            self.credentials, crypto_key, salt, msg.raw_data
-        )
+        try:
+            # Both headers can carry more than one parameter, in any order
+            # (e.g. "dh=<point>;p256ecdsa=<other key>") - take only the value
+            # for the parameter we actually want. Keeping the rest used to
+            # decode into one garbage-length blob instead of raising (base64
+            # silently drops the stray ";"/"=" characters from the second
+            # parameter rather than erroring on them), which then failed EC
+            # point validation with a confusing "Invalid EC key" deep inside
+            # http_ece.
+            crypto_key = self._header_param(self._app_data_by_key(msg, "crypto-key"), "dh")
+            salt = self._header_param(self._app_data_by_key(msg, "encryption"), "salt")
+            decrypted = self._decrypt_raw_data(
+                self.credentials, crypto_key, salt, msg.raw_data
+            )
+        except Exception as ex:
+            # One undecryptable message used to reach the catch-all in
+            # _listen and shut down the whole listener, taking every locate
+            # in flight with it. Returning still acks it, so it doesn't get
+            # redelivered on the next connection.
+            self._log_warn_with_limit(
+                "Skipping data message that could not be decrypted: %s: %s",
+                type(ex).__name__,
+                ex,
+            )
+            return
+        decrypted_json = None
         with contextlib_suppress(json.JSONDecodeError, ValueError):
             decrypted_json = json.loads(decrypted.decode("utf-8"))
 
@@ -684,8 +707,10 @@ class FcmPushClient:  # pylint:disable=too-many-instance-attributes
             _logger.debug("Connected to MCS endpoint (%s,%s)", MCS_HOST, MCS_PORT)
             return True
         except OSError as oex:
-            _logger.error(
-                "Could not connected to MCS endpoint (%s,%s): %s",
+            # Each attempt is retried, so only the final failure in
+            # _connect_with_retry is worth an ERROR (and a notification)
+            _logger.info(
+                "Could not connect to MCS endpoint (%s,%s): %r",
                 MCS_HOST,
                 MCS_PORT,
                 oex,

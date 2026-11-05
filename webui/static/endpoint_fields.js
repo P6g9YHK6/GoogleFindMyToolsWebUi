@@ -46,6 +46,23 @@
     header: ["Header name", "Bearer {{token}}"],
   };
 
+  // Per body type, matching how webui/forwarders/custom.py actually sends
+  // each one - form is one key=value pair per line, not JSON.
+  const BODY_PLACEHOLDERS = {
+    json: '{"device": "{{device_name}}", "lat": {{latitude}}, "lon": {{longitude}}}',
+    form: "device={{device_name}}\nlat={{latitude}}\nlon={{longitude}}",
+    raw: "{{device_name}} {{latitude}},{{longitude}}",
+  };
+
+  // A Content-Type header row whose value is one of these gets switched
+  // along with the body type; anything else was typed on purpose and is
+  // left alone.
+  const BODY_CONTENT_TYPES = {
+    json: "application/json",
+    form: "application/x-www-form-urlencoded",
+    raw: "text/plain",
+  };
+
   let activeField = null;
   document.addEventListener("focusin", (e) => {
     if (e.target.matches(".templatable")) activeField = e.target;
@@ -73,7 +90,7 @@
   }
 
   function autosizeAll(scope) {
-    (scope || document).querySelectorAll(".url-autosize").forEach(autosizeUrlField);
+    (scope || document).querySelectorAll(".url-autosize, .body-textarea").forEach(autosizeUrlField);
   }
 
   // ---- key/value rows (headers) ------------------------------------------
@@ -141,6 +158,88 @@
     const body = block.querySelector(".body-textarea");
     if (!bodyType || !body) return;
     body.style.display = bodyType.value === "none" ? "none" : "";
+    body.placeholder = BODY_PLACEHOLDERS[bodyType.value] || "";
+    // "None" only hides the textarea and keeps its text, so the format to
+    // convert from next time is still whatever it was before that.
+    if (bodyType.value !== "none") bodyType.dataset.prevType = bodyType.value;
+    autosizeUrlField(body);
+  }
+
+  // ---- body type conversion ---------------------------------------------
+
+  // "key=value" lines, same rules as custom.py's form branch: lines without
+  // an "=" are skipped.
+  function parseFormBody(text) {
+    return text.split("\n").filter((line) => line.includes("=")).map((line) => {
+      const i = line.indexOf("=");
+      return [line.slice(0, i).trim(), line.slice(i + 1).trim()];
+    });
+  }
+
+  // A flat JSON object template as [key, value] pairs, or null if it isn't
+  // one. Bare {{tokens}} (e.g. "lat": {{latitude}}) aren't valid JSON, so
+  // they're swapped for a marker object before parsing and back after.
+  function parseFlatJsonBody(text) {
+    const marked = text.replace(/"(?:[^"\\]|\\.)*"|\{\{(\w+)\}\}/g, (m, name) =>
+      name ? JSON.stringify({ __token: name }) : m);
+    let obj;
+    try {
+      obj = JSON.parse(marked);
+    } catch (e) {
+      return null;
+    }
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+    const pairs = [];
+    for (const [k, v] of Object.entries(obj)) {
+      if (v && typeof v === "object") {
+        if (typeof v.__token !== "string") return null;
+        pairs.push([k, "{{" + v.__token + "}}"]);
+      } else {
+        pairs.push([k, v === null ? "" : String(v)]);
+      }
+    }
+    return pairs;
+  }
+
+  // Numbers, booleans and numeric-valued tokens go in bare, everything else
+  // as a JSON string.
+  function formToJsonBody(pairs, vars) {
+    const isNumber = (s) => /^-?\d+(\.\d+)?$/.test(s);
+    const entries = pairs.map(([k, v]) => {
+      const token = /^\{\{(\w+)\}\}$/.exec(v);
+      const bare = token ? isNumber(String(vars[token[1]] ?? "")) : isNumber(v) || v === "true" || v === "false";
+      return JSON.stringify(k) + ": " + (bare ? v : JSON.stringify(v));
+    });
+    return "{" + entries.join(", ") + "}";
+  }
+
+  // Rewrites the body into the newly picked format where that's lossless
+  // (flat JSON <-> form). Raw text, nested JSON, or anything that doesn't
+  // parse is left exactly as typed.
+  function convertBody(block, from, to) {
+    const body = block.querySelector(".body-textarea");
+    if (!body || !body.value.trim() || !from || from === to) return;
+    if (from === "json" && to === "form") {
+      const pairs = parseFlatJsonBody(body.value);
+      if (pairs) body.value = pairs.map(([k, v]) => k + "=" + v).join("\n");
+    } else if (from === "form" && to === "json") {
+      const pairs = parseFormBody(body.value);
+      if (pairs.length) body.value = formToJsonBody(pairs, blockVars(block));
+    }
+  }
+
+  function syncContentTypeHeader(block, to) {
+    const tbody = block.querySelector('.kv-body[data-kv="header"]');
+    if (!tbody) return;
+    const known = Object.values(BODY_CONTENT_TYPES);
+    tbody.querySelectorAll("tr").forEach((tr) => {
+      const key = tr.querySelector(".kv-key");
+      const value = tr.querySelector(".kv-value");
+      if (key.value.trim().toLowerCase() !== "content-type") return;
+      if (!known.includes(value.value.trim().toLowerCase())) return;
+      if (BODY_CONTENT_TYPES[to]) value.value = BODY_CONTENT_TYPES[to];
+      else tr.remove();
+    });
   }
 
   // ---- toggle-gated fields --------------------------------------------
@@ -350,7 +449,11 @@
 
     if (bodyType !== "none" && bodyText.trim()) {
       out += "\n\n" + '<span class="preview-muted">Body (' + escapeHtml(bodyType.toUpperCase()) + ")</span>\n";
-      out += renderTemplate(bodyText, vars);
+      // Form is sent url-encoded from its key=value lines, so show it that
+      // way rather than as the raw textarea text.
+      out += bodyType === "form"
+        ? parseFormBody(bodyText).map(([k, v]) => escapeHtml(k) + "=" + renderTemplate(v, vars)).join("&")
+        : renderTemplate(bodyText, vars);
     }
 
     preview.innerHTML = out;
@@ -439,6 +542,8 @@
         const hidden = event.target.closest("label")?.querySelector("input[type='hidden']");
         if (hidden) hidden.value = event.target.checked ? "1" : "0";
       } else if (event.target.matches(".body-type-select")) {
+        convertBody(block, event.target.dataset.prevType, event.target.value);
+        syncContentTypeHeader(block, event.target.value);
         updateBodyVisibility(block);
         updatePreview(block);
       } else if (event.target.matches("select, input")) {
@@ -450,7 +555,7 @@
   });
 
   document.addEventListener("input", (event) => {
-    if (event.target.classList.contains("url-autosize")) autosizeUrlField(event.target);
+    if (event.target.matches(".url-autosize, .body-textarea")) autosizeUrlField(event.target);
     const block = event.target.closest(".endpoint-block");
     if (block) {
       if (event.target.classList.contains("endpoint-alias")) {

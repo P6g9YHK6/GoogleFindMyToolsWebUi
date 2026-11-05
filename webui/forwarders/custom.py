@@ -146,7 +146,11 @@ def forward_to_custom(
                 k, _, v = line.partition("=")
                 data[k.strip()] = _render(v.strip(), ctx)
 
-    response = httpx.request(method, url, headers=headers, timeout=TIMEOUT_S, content=content, data=data)
+    # UTF-8, not httpx's default ASCII - a header templated from a tracker's
+    # name (e.g. "Clés") would otherwise raise before anything gets sent.
+    response = httpx.request(
+        method, url, headers=httpx.Headers(headers, encoding="utf-8"), timeout=TIMEOUT_S, content=content, data=data,
+    )
     if response_out is not None:
         # Captured before raise_for_status() - a non-2xx's body is exactly
         # what's worth logging, not just its status.

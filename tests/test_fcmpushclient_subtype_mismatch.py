@@ -72,3 +72,80 @@ def test_multi_param_headers_are_trimmed_to_just_the_value_we_want(monkeypatch):
 
     assert captured["crypto_key"] == "REALDHVALUE"
     assert captured["salt"] == "REALSALTVALUE"
+
+
+def test_header_params_are_found_by_name_not_position(monkeypatch):
+    """A leading p256ecdsa= used to be sliced as if it were dh=, so the
+    wrong key went into the decode and failed with "Invalid EC key"."""
+    client = _make_client(app_id="our-real-app-id")
+
+    captured = {}
+
+    def fake_decrypt(credentials, crypto_key, salt, raw_data):
+        captured["crypto_key"] = crypto_key
+        captured["salt"] = salt
+        return b"{}"
+
+    monkeypatch.setattr(FcmPushClient, "_decrypt_raw_data", staticmethod(fake_decrypt))
+
+    msg = DataMessageStanza()
+    msg.app_data.append(AppData(key="subtype", value="our-real-app-id"))
+    msg.app_data.append(AppData(key="crypto-key", value="p256ecdsa=OTHERKEY=; dh=REALDHVALUE="))
+    msg.app_data.append(AppData(key="encryption", value="rs=4096,salt=REALSALTVALUE"))
+
+    client._handle_data_message(msg)
+
+    assert captured["crypto_key"] == "REALDHVALUE="
+    assert captured["salt"] == "REALSALTVALUE"
+
+
+def test_an_undecryptable_message_is_skipped_without_raising(monkeypatch):
+    received = []
+    config = FcmRegisterConfig(
+        project_id="proj", app_id="app", api_key="key", messaging_sender_id="sender",
+    )
+    client = FcmPushClient(
+        callback=lambda *a: received.append(a),
+        fcm_config=config,
+        credentials={"gcm": {"app_id": "our-real-app-id"}},
+    )
+
+    def invalid_key(*args, **kwargs):
+        raise ValueError("Invalid EC key.")
+
+    monkeypatch.setattr(FcmPushClient, "_decrypt_raw_data", staticmethod(invalid_key))
+
+    # Must not raise - anything escaping here reaches the catch-all in _listen
+    # and shuts down the listener.
+    client._handle_data_message(_stanza(subtype="our-real-app-id"))
+    assert received == []
+
+
+def test_a_message_with_missing_headers_is_skipped_without_raising():
+    client = _make_client(app_id="our-real-app-id")
+
+    no_subtype = DataMessageStanza()
+    client._handle_data_message(no_subtype)
+
+    no_crypto_headers = DataMessageStanza()
+    no_crypto_headers.app_data.append(AppData(key="subtype", value="our-real-app-id"))
+    client._handle_data_message(no_crypto_headers)
+
+
+def test_a_non_json_payload_reaches_the_callback_as_bytes(monkeypatch):
+    received = []
+    config = FcmRegisterConfig(
+        project_id="proj", app_id="app", api_key="key", messaging_sender_id="sender",
+    )
+    client = FcmPushClient(
+        callback=lambda payload, *a: received.append(payload),
+        fcm_config=config,
+        credentials={"gcm": {"app_id": "our-real-app-id"}},
+    )
+
+    monkeypatch.setattr(
+        FcmPushClient, "_decrypt_raw_data", staticmethod(lambda *a, **kw: b"not json"),
+    )
+
+    client._handle_data_message(_stanza(subtype="our-real-app-id"))
+    assert received == [b"not json"]

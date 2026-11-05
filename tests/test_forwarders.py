@@ -1,5 +1,7 @@
 """Pure-logic unit tests for the forwarders package - no HTTP involved."""
 
+import pytest
+
 from webui.forwarders import PRESETS, blank_endpoint
 
 
@@ -8,6 +10,7 @@ def test_presets_cover_traccar_and_phonetrack_and_custom():
         "custom", "traccar", "phonetrack",
         "phonetrack_osmand", "phonetrack_gpslogger", "phonetrack_locusmap",
         "phonetrack_ulogger", "phonetrack_owntracks", "phonetrack_overland",
+        "owntracks_recorder", "owntracks_home_assistant",
     }
     for preset in PRESETS.values():
         assert preset["method"] in ("GET", "POST", "PUT", "PATCH", "DELETE")
@@ -65,6 +68,34 @@ def test_phonetrack_owntracks_and_overland_presets_render_to_valid_json():
         assert preset["body_type"] == "json"
         rendered = json.loads(_render(preset["body"], ctx))
         assert rendered  # parses and isn't empty
+
+
+@pytest.mark.parametrize("key, url_path", [
+    ("owntracks_recorder", "/pub"),
+    ("owntracks_home_assistant", "/api/webhook/REPLACE_WITH_YOUR_WEBHOOK_ID"),
+])
+def test_owntracks_presets_send_what_their_receiver_reads(key, url_path):
+    """Both take the user/device from X-Limit-U/X-Limit-D. Home Assistant
+    silently drops a location with no "acc", or one that isn't valid JSON."""
+    import json
+
+    from webui.forwarders.custom import _render, build_context
+
+    preset = PRESETS[key]
+    assert preset["method"] == "POST"
+    assert preset["url"].endswith(url_path)
+    assert preset["headers"]["X-Limit-D"] == "{{device_alias}}"
+    assert preset["headers"]["X-Limit-U"]
+
+    location = {"latitude": 47.1, "longitude": 8.5, "altitude": None, "accuracy": 10.0, "time": 1700000000}
+    rendered = json.loads(_render(preset["body"], build_context({}, location, "MyPhone")))
+    assert rendered == {"_type": "location", "lat": 47.1, "lon": 8.5, "tst": 1700000000, "acc": 10.0}
+
+
+def test_owntracks_home_assistant_preset_names_each_tracker_after_its_alias():
+    """Home Assistant labels the tracker with X-Limit-U, so a fixed value there
+    would show every tracker under the same name."""
+    assert PRESETS["owntracks_home_assistant"]["headers"]["X-Limit-U"] == "{{device_alias}}"
 
 
 def test_traccar_preset_renders_a_parseable_url_for_a_named_location_with_no_altitude():
