@@ -121,10 +121,8 @@
           {% endfor %}
         </select>
       </div>
-      {% set body_placeholder %}{% raw %}{ 'device': '{{device_name}}', 'lat': {{latitude}}, 'lon': {{longitude}} }{% endraw %}{% endset %}
       <textarea name="ep-{{ idx }}-body" class="templatable body-textarea"
-                {% if (endpoint.body_type or "none") == "none" %}style="display:none"{% endif %}
-                placeholder="{{ body_placeholder }}">{{ endpoint.body or '' }}</textarea>
+                {% if (endpoint.body_type or "none") == "none" %}style="display:none"{% endif %}>{{ endpoint.body or '' }}</textarea>
     </div>
   </fieldset>
 
