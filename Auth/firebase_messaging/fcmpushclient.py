@@ -707,8 +707,10 @@ class FcmPushClient:  # pylint:disable=too-many-instance-attributes
             _logger.debug("Connected to MCS endpoint (%s,%s)", MCS_HOST, MCS_PORT)
             return True
         except OSError as oex:
-            _logger.error(
-                "Could not connected to MCS endpoint (%s,%s): %s",
+            # Each attempt is retried, so only the final failure in
+            # _connect_with_retry is worth an ERROR (and a notification)
+            _logger.info(
+                "Could not connect to MCS endpoint (%s,%s): %r",
                 MCS_HOST,
                 MCS_PORT,
                 oex,
