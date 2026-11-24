@@ -79,6 +79,11 @@ jobs:
             echo "No open Dependabot PR into dev for this branch, nothing to do"
             exit 0
           fi
+          # Run outside the checkout: inside a git repo, --delete-branch also
+          # tries to switch the local clone to dev, which this shallow
+          # single-branch checkout doesn't have, and the step dies after the
+          # merge but before the image rebuild.
+          cd "$RUNNER_TEMP"
           gh pr merge "$pr" --squash --delete-branch
           gh workflow run docker-publish.yml --ref dev
 
