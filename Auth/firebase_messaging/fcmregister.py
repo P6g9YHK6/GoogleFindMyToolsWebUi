@@ -364,6 +364,7 @@ class FcmRegister:
         if not self.credentials:
             raise RuntimeError("Credentials must be set to refresh install token")
         fcm_refresh_token = self.credentials["fcm"]["installation"]["refresh_token"]
+        fid = self.credentials["fcm"]["installation"]["fid"]
 
         headers = {
             "Authorization": f"{AUTH_VERSION} {fcm_refresh_token}",
@@ -379,7 +380,7 @@ class FcmRegister:
         }
         url = (
             FCM_INSTALLATION + f"projects/{self.config.project_id}/"
-            "installations/{fid}/authTokens:generate"
+            f"installations/{fid}/authTokens:generate"
         )
         async with self._session.post(
             url=url,

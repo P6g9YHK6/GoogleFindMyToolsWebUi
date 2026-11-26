@@ -178,6 +178,19 @@ def test_a_malformed_cert_fingerprint_is_rejected():
         fcmregister._normalize_sha1_fingerprint("not-a-fingerprint")
 
 
+async def test_refresh_targets_this_installation(session):
+    session.answer(FCM_INSTALLATION, _Response(200, json.dumps({"token": "new-token", "expiresIn": "3600s"})))
+    credentials = {"fcm": {"installation": {"refresh_token": "refresh-1", "fid": "fid-1"}}}
+
+    result = await FcmRegister(_config(), credentials, http_client_session=session).fcm_refresh_install_token()
+
+    assert result["token"] == "new-token"
+    assert result["expires_in"] == 3600
+    sent = session.sent_to(FCM_INSTALLATION)[0]
+    assert sent["url"] == FCM_INSTALLATION + "projects/proj/installations/fid-1/authTokens:generate"
+    assert sent["headers"]["Authorization"] == "FIS_v2 refresh-1"
+
+
 async def test_fcm_register_leaves_out_the_default_vapid_key(session):
     session.answer(FCM_REGISTRATION, _Response(200, json.dumps({"token": "fcm-token"})))
     register = FcmRegister(_config(), http_client_session=session)
