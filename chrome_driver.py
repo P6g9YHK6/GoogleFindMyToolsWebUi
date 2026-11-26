@@ -6,7 +6,6 @@ import logging
 import os
 import platform
 import shutil
-import time
 
 import undetected_chromedriver as uc
 
@@ -71,19 +70,24 @@ def get_options():
     chrome_options.add_argument("--disable-dev-shm-usage")
     return chrome_options
 
+_last_driver = None
+
+
 def create_driver():
     """Create a Chrome WebDriver with undetected_chromedriver."""
-    try:
-        # Kill any existing Chrome processes first
+    global _last_driver
+    if _last_driver is not None:
         try:
-            if platform.system() == "Windows":
-                os.system("taskkill /f /im chrome.exe >nul 2>&1")
-            else:
-                os.system("pkill -f chrome")
-            time.sleep(2)  # Wait for processes to close
+            _last_driver.quit()
         except Exception:
             pass
-            
+        _last_driver = None
+    _last_driver = _create_driver()
+    return _last_driver
+
+
+def _create_driver():
+    try:
         chrome_options = get_options()
         driver = uc.Chrome(options=chrome_options, version_main=None)
         logger.info("Installed and browser started.")

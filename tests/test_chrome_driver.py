@@ -34,8 +34,6 @@ def test_create_driver_raises_with_the_hint_on_a_version_mismatch(monkeypatch, c
 
     monkeypatch.setattr(chrome_driver, "find_chrome", lambda: None)
     monkeypatch.setattr(chrome_driver.uc, "Chrome", raise_version_mismatch)
-    monkeypatch.setattr(chrome_driver.os, "system", lambda *a, **kw: None)
-    monkeypatch.setattr(chrome_driver.time, "sleep", lambda *a, **kw: None)
 
     with caplog.at_level(logging.WARNING, logger="chrome_driver"):
         with pytest.raises(Exception, match="GFMT_CHROME_BINARY"):
@@ -51,11 +49,32 @@ def test_create_driver_does_not_add_the_hint_for_unrelated_failures(monkeypatch,
 
     monkeypatch.setattr(chrome_driver, "find_chrome", lambda: None)
     monkeypatch.setattr(chrome_driver.uc, "Chrome", raise_plain)
-    monkeypatch.setattr(chrome_driver.os, "system", lambda *a, **kw: None)
-    monkeypatch.setattr(chrome_driver.time, "sleep", lambda *a, **kw: None)
 
     with caplog.at_level(logging.WARNING, logger="chrome_driver"):
         with pytest.raises(Exception):
             chrome_driver.create_driver()
 
     assert "version mismatch" not in caplog.text
+
+
+def test_create_driver_quits_only_the_driver_it_created_last(monkeypatch):
+    class FakeDriver:
+        def __init__(self, *a, **kw):
+            self.quit_calls = 0
+
+        def quit(self):
+            self.quit_calls += 1
+
+    def no_shell(*a, **kw):
+        raise AssertionError("create_driver must not shell out to kill processes")
+
+    monkeypatch.setattr(chrome_driver, "_last_driver", None)
+    monkeypatch.setattr(chrome_driver.uc, "Chrome", FakeDriver)
+    monkeypatch.setattr(chrome_driver.os, "system", no_shell)
+
+    first = chrome_driver.create_driver()
+    second = chrome_driver.create_driver()
+
+    assert first.quit_calls == 1
+    assert second.quit_calls == 0
+    assert chrome_driver._last_driver is second

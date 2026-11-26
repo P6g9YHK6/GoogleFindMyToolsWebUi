@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 
 SIGN_IN_WAIT_S = 300
 
-# create_driver() unconditionally pkills any running "chrome" process before
-# launching a new one, so two overlapping calls would kill each other's
-# browser. This serializes them process-wide instead of racing.
+# create_driver() quits the browser it created last before launching a new
+# one, so two overlapping calls would kill each other's browser. This
+# serializes them process-wide instead of racing.
 _flow_lock = threading.Lock()
 
 def request_oauth_account_token_flow():
