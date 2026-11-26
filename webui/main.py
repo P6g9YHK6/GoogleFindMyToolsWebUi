@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI):
         # own docstring for why a device with no forwarding endpoints (never
         # polled by any of that module's per-device loops) still needs this.
         staleness_task = asyncio.create_task(staleness.sweep_loop())
-        # Returns straight away unless EID_UPLOAD is set, see webui/eid_upload.py.
+        # On by default, returns straight away with EID_UPLOAD=off, see webui/eid_upload.py.
         eid_upload_task = asyncio.create_task(eid_upload.upload_loop())
         # Reclaim anything that grew while the app was down: a /firmware volume
         # (firmware_builds and the on-demand ESP-IDF toolchain, see config.py's

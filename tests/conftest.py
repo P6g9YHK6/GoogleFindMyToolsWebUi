@@ -42,6 +42,12 @@ os.environ.pop("GFMT_TLS_KEY_PATH", None)
 os.environ.pop("GFMT_TLS_SAN", None)
 os.environ.pop("APPRISE_URLS", None)  # deterministic: no real notifications fired from tests
 os.environ.pop("DEMO_MODE", None)  # deterministic: demo mode off unless a test explicitly enables it
+# EID upload is on by default and starts with the app's lifespan. Whichever
+# test first imports webui.main gives webui/eid_upload.py the stubbed
+# is_logged_in below, so it went on to a real request_device_list() - a
+# real FCM registration against Google in a worker thread, which then held
+# interpreter exit for minutes. Tests that want it set config.EID_UPLOAD.
+os.environ["EID_UPLOAD"] = "off"
 
 import pytest  # noqa: E402
 from starlette.testclient import TestClient  # noqa: E402
