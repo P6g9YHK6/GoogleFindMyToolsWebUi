@@ -1,6 +1,8 @@
 import asyncio
 import time
 
+import pytest
+
 from FMDNCrypto.eid_generator import ROTATION_PERIOD, generate_eid
 from FMDNCrypto.foreign_tracker_cryptor import encrypt
 from ProtoDecoders import DeviceUpdate_pb2
@@ -430,3 +432,108 @@ def test_upload_drops_upcoming_eids_only_if_refused(monkeypatch):
     assert len(sent) == 2
     assert _latest_eid_real_time(sent[0], clock_zero) > time.time()
     assert _latest_eid_real_time(sent[1], clock_zero) <= time.time()
+
+
+# --- regressions without a test of their own ----------------------------
+
+def test_rotating_eids_never_repeat_an_offset_across_drift_slots():
+    start = PAIR_DATE + 10 * ROTATION_PERIOD
+    eids = upload.get_rotating_eids(EIK, PAIR_DATE, PAIR_DATE, start, duration_seconds=3 * ROTATION_PERIOD,
+                                    drift_slots=2)
+
+    offsets = [e.timestamp.seconds - PAIR_DATE for e in eids]
+    assert len(offsets) == len(set(offsets))
+    assert offsets == [i * ROTATION_PERIOD for i in range(8, 16)]
+
+
+def test_rotating_eids_stop_at_now():
+    start = PAIR_DATE + 10 * ROTATION_PERIOD
+    now = PAIR_DATE + 12 * ROTATION_PERIOD + 5
+    eids = upload.get_rotating_eids(EIK, PAIR_DATE, PAIR_DATE, start, duration_seconds=10 * ROTATION_PERIOD,
+                                    now=now)
+
+    assert max(e.timestamp.seconds for e in eids) <= now
+
+
+def test_upload_once_skips_devices_without_canonic_id(monkeypatch):
+    device_list = DeviceUpdate_pb2.DevicesList()
+    _device(device_list, "Keys", "tracker-1")
+    orphan = device_list.deviceMetadata.add()
+    orphan.userDefinedDeviceName = "Orphan"
+    orphan.identifierInformation.type = DeviceUpdate_pb2.IDENTIFIER_SPOT
+    located = []
+
+    async def _locate(canonic_id, name, timeout, capture):
+        located.append(canonic_id)
+        return [], capture
+
+    monkeypatch.setattr(eid_upload, "is_logged_in", lambda: True)
+    monkeypatch.setattr(eid_upload, "request_device_list", lambda: device_list.SerializeToString().hex())
+    monkeypatch.setattr(eid_upload, "locate_device_with_capture", _locate)
+    monkeypatch.setattr(eid_upload, "_get_persisted_clock_zero", lambda canonic_id: None)
+    monkeypatch.setattr(eid_upload, "refresh_owned_trackers", lambda *args, **kwargs: 1)
+
+    assert asyncio.run(eid_upload.upload_once(dry_run=True)) == 1
+    assert located == ["tracker-1"]
+
+
+def test_upload_loop_keeps_going_after_a_failure(monkeypatch, caplog):
+    monkeypatch.setattr(config, "EID_UPLOAD", "on")
+    calls = []
+
+    async def _upload_once(dry_run):
+        calls.append(dry_run)
+        if len(calls) == 1:
+            raise RuntimeError("boom")
+        return 1
+
+    async def _sleep(seconds):
+        if len(calls) >= 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(eid_upload, "upload_once", _upload_once)
+    monkeypatch.setattr(eid_upload.asyncio, "sleep", _sleep)
+
+    try:
+        asyncio.run(eid_upload.upload_loop())
+    except asyncio.CancelledError:
+        pass
+
+    assert calls == [False, False]
+    assert "EID upload failed" in caplog.text
+
+
+@pytest.mark.parametrize("entry", [
+    {"clock_zero": "123", "saved_at": 1},
+    {"clock_zero": 123, "saved_at": "yesterday"},
+    {"saved_at": 1},
+    123,
+])
+def test_malformed_persisted_clock_zero_is_ignored(monkeypatch, entry):
+    _stub_clock_store(monkeypatch, entry)
+    assert eid_upload._get_persisted_clock_zero("tracker-1") is None
+
+
+def test_clock_zero_without_any_report_keeps_the_old_value_unsaved(monkeypatch):
+    expired = int(time.time()) - eid_upload.CLOCK_ZERO_TTL_S - 1
+    devices = _stub_clock_store(monkeypatch, {"clock_zero": 123, "saved_at": expired})
+    raw = _device_update([]).SerializeToString().hex()
+
+    async def _locate(canonic_id, name, timeout, capture):
+        capture["raw_hex"] = raw
+        return [], capture
+
+    monkeypatch.setattr(eid_upload, "locate_device_with_capture", _locate)
+
+    assert asyncio.run(eid_upload._clock_zero("tracker-1", "Keys")) == 123
+    assert devices["tracker-1"]["clock_zero"]["saved_at"] == expired
+
+
+def test_upload_gives_up_if_the_past_only_retry_is_refused_too(monkeypatch):
+    device_list = DeviceUpdate_pb2.DevicesList()
+    _device(device_list, "Keys", "tracker-1")
+    refused = RuntimeError("failed with 400: INVALID_ARGUMENT")
+    _stub_upload(monkeypatch, [refused, refused])
+
+    with pytest.raises(RuntimeError):
+        upload.refresh_owned_trackers(device_list, drift_slots=0)
