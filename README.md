@@ -5,6 +5,14 @@
 # GoogleFindMyToolsWebUi
 
 [![Lint and test](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/actions/workflows/test.yml/badge.svg)](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/actions/workflows/test.yml)
+[![Docker](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/actions/workflows/docker-publish.yml)
+[![Firmware build](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/actions/workflows/build-firmware-zephyr.yml/badge.svg)](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/actions/workflows/build-firmware-zephyr.yml)
+[![License](https://img.shields.io/github/license/P6g9YHK6/GoogleFindMyToolsWebUi)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/P6g9YHK6/GoogleFindMyToolsWebUi)](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/releases)
+[![GHCR](https://img.shields.io/badge/ghcr.io-googlefindmytools-blue?logo=docker)](https://github.com/users/P6g9YHK6/packages/container/package/googlefindmytools)
+[![Pulls](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fgithub.com%2Fipitio%2Fbackage%2Fraw%2Findex%2FP6g9YHK6%2FGoogleFindMyToolsWebUi%2Fgooglefindmytools.json&query=%24.downloads&logo=docker&label=pulls)](https://github.com/users/P6g9YHK6/packages/container/package/googlefindmytools)
+[![Last commit](https://img.shields.io/github/last-commit/P6g9YHK6/GoogleFindMyToolsWebUi/dev)](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/commits/dev)
+[![Dependabot](https://img.shields.io/badge/dependabot-enabled-025e8c?logo=dependabot)](.github/dependabot.yml)
 
 A self-hosted app that logs into your Google account, keeps polling your Find My Device / Find Hub trackers and Android phones, and forwards each new location to your own Traccar, Nextcloud PhoneTrack, OwnTracks Recorder or Home Assistant server, so you keep your location history on your own infrastructure instead of nowhere. One Docker container, a web UI, nothing else to run.
 
