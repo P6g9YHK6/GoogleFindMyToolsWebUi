@@ -1,0 +1,310 @@
+/* Buttons */
+button, input[type="submit"] {
+  font-family: inherit;
+  font-size: var(--font-size-base);
+  font-weight: 500;
+  color: var(--primary-contrast);
+  background: var(--primary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease;
+}
+
+button:hover:not(:disabled) {
+  background: var(--primary-hover);
+  box-shadow: var(--shadow-md);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.btn-outline-danger {
+  background: var(--surface);
+  color: var(--danger);
+  border-color: var(--border);
+}
+
+.btn-outline-danger:hover:not(:disabled) {
+  background: var(--surface-alt);
+}
+
+/* Forms */
+form {
+  margin: 0 0 1rem;
+}
+
+fieldset {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.25rem 1.25rem;
+  margin-bottom: 1.5rem;
+  box-shadow: var(--shadow);
+  /* Browsers default a <fieldset> to min-width: min-content - it refuses to
+     shrink narrower than its legend's content (here, a device name plus an
+     "Edit as YAML" button, or "Endpoint N" plus "Send now"/"Remove"
+     buttons), overflowing the viewport on a narrow screen regardless of any
+     flex-wrap/min-width set on stuff further down. This is the one place
+     that actually needs overriding for that to stop. */
+  min-width: 0;
+}
+
+fieldset fieldset {
+  background: var(--surface-alt);
+  box-shadow: none;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+legend {
+  font-weight: 600;
+  padding: 0 0.4rem;
+  color: var(--text);
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.75rem 0;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+input[type="text"],
+input[type="number"],
+input[type="password"],
+input[type="email"],
+input[type="url"],
+select,
+textarea {
+  font-family: inherit;
+  font-size: var(--font-size-base);
+  font-weight: 400;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.65rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* label's flex-column + the default align-items:stretch (see `label` above)
+   means every plain input/select in here fills its *entire* container
+   width with nothing else to size it - fine up to a normal form column,
+   but on a wide monitor (main can be up to 1800px, see its own comment)
+   a one-line "cron expression" or a number field would otherwise balloon
+   to a thousand-plus pixels wide. Textarea is deliberately excluded - the
+   URL/YAML/body editors want all the width they can get. */
+input[type="text"],
+input[type="number"],
+input[type="password"],
+input[type="email"],
+input[type="url"],
+select {
+  max-width: 26rem;
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) var(--tint-focus), transparent);
+}
+
+.yaml-editor {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  white-space: pre;
+}
+
+/* Table */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+th, td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background: var(--surface-alt);
+}
+
+/* Sortable + resizable columns (Logs - see static/tables.js).
+   Opt-in via .sortable-table, not every <table> - the endpoint editor's
+   Headers key/value table is editable form input, not browsable data, and
+   sorting/resizing would just fight with its own add/remove-row behavior. */
+.sortable-table th {
+  position: relative;
+  cursor: pointer;
+  user-select: none;
+  padding-right: 1.35rem; /* room for the resize handle without crowding the text/indicator */
+}
+
+.sortable-table th:hover {
+  background: color-mix(in srgb, var(--text-muted) 12%, var(--surface-alt));
+}
+
+.sort-indicator {
+  color: var(--primary);
+}
+
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 16px; /* wider than it looks (the visible bar is 2px) - a comfortable touch target */
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.col-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 18%;
+  bottom: 18%;
+  right: 6px;
+  width: 2px;
+  background: var(--border);
+}
+
+.col-resize-handle:hover::after {
+  background: var(--primary);
+}
+
+body.col-resizing {
+  cursor: col-resize;
+}
+
+body.col-resizing, body.col-resizing * {
+  user-select: none;
+}
+
+/* Drag-to-reorder columns (static/tables.js's addDragHandle/moveColumn) -
+   its own handle on the left of each th, separate from the resize handle
+   on the right, so a reorder drag and a resize drag can never be started
+   by the same gesture. */
+.col-drag-handle {
+  display: inline-block;
+  margin-right: 0.3rem;
+  cursor: grab;
+  color: var(--text-muted);
+  touch-action: none;
+}
+
+.col-drag-handle::before {
+  content: "⠿";
+}
+
+.col-dragging {
+  opacity: 0.5;
+}
+
+body.col-reordering, body.col-reordering * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+/* "Columns" show/hide menu (devices/_table.html, logs/_table.html) - a
+   native <details>/<summary> disclosure, same pattern as .device-details,
+   so open/close state and outside-click dismissal come for free instead
+   of being hand-rolled. */
+.table-toolbar {
+  margin-bottom: 0.6rem;
+}
+
+.columns-menu {
+  position: relative;
+  display: inline-block;
+}
+
+.columns-menu summary {
+  list-style: none;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+
+.columns-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.columns-menu summary:hover {
+  background: var(--surface-alt);
+}
+
+.columns-menu[open] summary {
+  border-color: var(--primary);
+}
+
+.columns-menu menu {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 0.3rem);
+  left: 0;
+  min-width: 12rem;
+  margin: 0;
+  padding: 0.4rem;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+}
+
+.columns-menu li {
+  padding: 0.15rem 0;
+}
+
+.columns-menu label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr:hover {
+  background: var(--surface-alt);
+}
+
+td button {
+  margin: 0.1rem 0.3rem 0.1rem 0;
+}

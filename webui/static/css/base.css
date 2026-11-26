@@ -1,0 +1,331 @@
+:root {
+  /* Dracula, exact, for the dark build below; this light build keeps the
+     same hue identities (purple/pink/cyan/success/warning/danger) turned up
+     in saturation/darkened to hold contrast on a light ground, rather than
+     being an unrelated palette - see this design's own mockup for the
+     side-by-side swatches it was built from. */
+  --bg: #f7f6fb;
+  --surface: #ffffff;
+  --surface-alt: #eeecf6;
+  --border: #ddd9ec;
+  --text: #262736;
+  --text-muted: #5b5f86;
+  --primary: #7c4fd6;
+  --primary-hover: #6a3dc0;
+  --primary-contrast: #ffffff;
+  --danger: #d6342f;
+  --success: #1f8f45;
+  --warning: #b5610a;
+  --purple: #7c4fd6;
+  --pink: #c22989;
+  --info: #0f7f93;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --shadow: 0 1px 2px rgba(38, 27, 60, 0.06), 0 1px 3px rgba(38, 27, 60, 0.08);
+  --shadow-md: 0 4px 10px rgba(38, 27, 60, 0.08), 0 2px 4px rgba(38, 27, 60, 0.06);
+  --shadow-lg: 0 12px 28px rgba(38, 27, 60, 0.16), 0 4px 8px rgba(38, 27, 60, 0.08);
+
+  /* 4px-based rem steps, following the values already scattered through
+     this file (0.3/0.4/0.5/0.6/0.75/0.85rem etc.) rather than a generic
+     8px scale that wouldn't match anything already here. Not adopted into
+     existing rules yet - introduced here so later passes can switch to
+     them one rule at a time instead of hand-picking a new value each time. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 2rem;
+  --space-8: 3rem;
+
+  /* Matches sizes already in use below (body 0.92rem-ish inputs, h2
+     1.2rem, h1 1.65rem) so switching a rule onto these later is a
+     non-visual swap, plus one new step (2xl) reserved for a stronger
+     page-title treatment. */
+  --font-size-xs: 0.78rem;
+  --font-size-sm: 0.85rem;
+  --font-size-base: 0.92rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.2rem;
+  --font-size-xl: 1.65rem;
+  --font-size-2xl: 1.85rem;
+
+  /* Named percentages for the color-mix() tints repeated throughout this
+     file, so the same "how strong is this tint" decision reads as one
+     name instead of a bare number at every call site. Only covers the
+     percentages that actually repeat across unrelated components - one-off
+     percentages stay as literals rather than being force-fit into a name
+     that wouldn't mean anything at the next call site. */
+  --tint-weak: 10%;
+  --tint-medium: 16%;
+  --tint-strong: 30%;
+  --tint-border: 35%;
+  --tint-focus: 22%;
+
+  /* Sora for headings, Figtree for body copy, JetBrains Mono for anything
+     literal (coordinates, cron expressions, device ids) - vendored locally
+     (see webui/static/vendor/fonts.css, built by scripts/copy-vendor.mjs),
+     not loaded from Google Fonts' CDN, matching the project's existing
+     "nothing phones home" stance that already motivated vendoring htmx and
+     Leaflet instead of using unpkg.com. */
+  --font-display: 'Sora', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-body: 'Figtree', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Dracula, exact: bd93f9 purple / ff79c6 pink / 8be9fd cyan / 50fa7b green /
+   ffb86c orange / ff5555 red on 282a36/343746/44475a. Guarded with
+   :not([data-theme="light"]) so an explicit Light choice (see the theme
+   switch in base.html) beats the OS/browser dark preference; the identical
+   values are repeated below under :root[data-theme="dark"] so an explicit
+   Dark choice wins even when the OS preference is light. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #282a36;
+    --surface: #343746;
+    --surface-alt: #21222c;
+    --border: #44475a;
+    --text: #f8f8f2;
+    --text-muted: #6272a4;
+    --primary: #bd93f9;
+    --primary-hover: #cdaafa;
+    --primary-contrast: #1c1324;
+    --danger: #ff5555;
+    --success: #50fa7b;
+    --warning: #ffb86c;
+    --purple: #bd93f9;
+    --pink: #ff79c6;
+    --info: #8be9fd;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 10px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 16px 32px rgba(0, 0, 0, 0.45), 0 4px 10px rgba(0, 0, 0, 0.35);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #282a36;
+  --surface: #343746;
+  --surface-alt: #21222c;
+  --border: #44475a;
+  --text: #f8f8f2;
+  --text-muted: #6272a4;
+  --primary: #bd93f9;
+  --primary-hover: #cdaafa;
+  --primary-contrast: #1c1324;
+  --danger: #ff5555;
+  --success: #50fa7b;
+  --warning: #ffb86c;
+  --purple: #bd93f9;
+  --pink: #ff79c6;
+  --info: #8be9fd;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 10px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 16px 32px rgba(0, 0, 0, 0.45), 0 4px 10px rgba(0, 0, 0, 0.35);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--bg);
+  margin: 0;
+  padding: 0 1.5rem 3rem;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Phones: the fixed 1.5rem side padding above eats a lot of a ~375px
+   viewport - shrink it instead of leaving less room for content than a
+   desktop window gets. */
+@media (max-width: 480px) {
+  body {
+    padding: 0 0.85rem 2rem;
+  }
+}
+
+main {
+  /* Was a flat 960px, then 1200px - every page in here (the endpoint
+     request builder's side-by-side rows, key/value tables, the devices
+     list, the forwarding/system log table) is table- or form-heavy content
+     that benefits from a bigger monitor instead of wrapping/scrolling
+     sooner than it needs to. min() instead of a flat px value so an
+     ultrawide monitor actually gets to use the extra room too, while a
+     1440px-ish laptop screen still keeps a bit of side margin instead of
+     running edge-to-edge. */
+  max-width: min(1800px, 96vw);
+  margin: 0 auto;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+h1 {
+  font-size: var(--font-size-2xl);
+  font-weight: 700;
+  margin: 1.75rem 0 1rem;
+}
+
+/* Page title + a page-level action button (Devices/Staleness's "Refresh
+   device list") on one row - the button carries its own spacing via this
+   flex row's gap, so it doesn't need to fight the h1's own margin. */
+.page-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1.75rem 0 1rem;
+}
+
+.page-head h1 {
+  margin: 0;
+}
+
+.device-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1rem;
+}
+
+.device-card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 1.1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.device-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.device-card-head .status-chip {
+  margin-bottom: 0;
+  flex: none;
+}
+
+.device-card-head-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: none;
+}
+
+.card-drag-handle {
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  width: 1.4rem;
+  height: 1.4rem;
+  color: var(--text-muted);
+  cursor: grab;
+  touch-action: none;
+  flex: none;
+}
+
+.card-drag-handle::before {
+  content: "⠿";
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.card-drag-handle:hover:not(:disabled) {
+  background: none;
+  color: var(--text);
+}
+
+.device-card.card-dragging {
+  opacity: 0.5;
+}
+
+body.card-reordering {
+  cursor: grabbing !important;
+}
+
+body.card-reordering * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+.device-card-name {
+  font-size: 1rem;
+}
+
+.device-card-alias {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.device-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.7rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.device-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding-top: 0.6rem;
+  margin-top: 0.2rem;
+  border-top: 1px solid var(--border);
+}
+
+h2 {
+  font-size: var(--font-size-lg);
+  margin: 2rem 0 0.75rem;
+}
+
+p {
+  color: var(--text-muted);
+  /* main can be up to 1800px wide (see its own comment) - a multi-sentence
+     paragraph at that width reads as one long uncomfortable line rather
+     than the page being "wide-screen friendly". ~65 characters/line is the
+     usual readable-line-length target; doesn't affect anything already
+     narrower than that. */
+  max-width: 65ch;
+}
+
+a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+code {
+  font-family: var(--font-mono);
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.15rem 0.4rem;
+  font-size: 0.9em;
+  color: var(--text);
+}

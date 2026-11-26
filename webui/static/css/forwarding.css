@@ -1,0 +1,158 @@
+/* URL scheme/host coloring - only used in the endpoint URL field
+   (endpoint_fields.js's renderUrlTemplate()), not the request preview
+   below, so the protocol and fqdn are readable at a glance while typing.
+   Not a correct/wrong state like the two above, so no background pill,
+   just a distinct, calmer text color. */
+.tok-scheme { color: var(--primary); }
+.tok-host { color: var(--purple); }
+
+/* Toggle + the field(s) it gates - hidden entirely, not just greyed out,
+   when the checkbox is off, with a left rule tying them to their toggle. */
+.toggle-group {
+  margin: 0.9rem 0;
+}
+
+.toggle-controlled {
+  margin: 0.6rem 0 0 1.6rem;
+  padding-left: 0.85rem;
+  border-left: 2px solid var(--border);
+}
+
+.toggle-controlled[hidden] {
+  display: none;
+}
+
+.toggle-controlled label {
+  margin: 0.4rem 0;
+}
+
+.toggle-controlled .field-hint {
+  margin: 0.3rem 0 0;
+}
+
+/* Save feedback + unsaved-changes flag */
+.device-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.save-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.save-toast {
+  display: inline-block;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--success);
+  animation: save-toast-fade 2.4s ease forwards;
+  animation-delay: 1s;
+}
+
+@keyframes save-toast-fade {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* Devices page "Actions" column feedback (see devices/_table.html and
+   devices/_sound_status.html) - a spinner while Locate/Play sound/Stop
+   sound is in flight, then a pass/fail glyph in its place. */
+.action-spinner {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.9rem;
+  margin-left: 0.3rem;
+  vertical-align: middle;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: action-spin 0.7s linear infinite;
+}
+
+@keyframes action-spin {
+  to { transform: rotate(360deg); }
+}
+
+.action-status {
+  display: inline-block;
+  margin-left: 0.3rem;
+  font-weight: 500;
+  vertical-align: middle;
+}
+
+.action-status--ok {
+  color: var(--success);
+  animation: save-toast-fade 2.4s ease forwards;
+  animation-delay: 1s;
+}
+
+.action-status--error {
+  color: var(--danger);
+}
+
+/* One .device-row per device on the Forwarding Settings page, each already
+   a bordered fieldset - without this, several devices (each with several
+   endpoint fieldsets of their own) run together into one long column of
+   near-identical boxes with nothing marking where one device ends and the
+   next begins. */
+.device-row + .device-row {
+  margin-top: 2rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--border);
+}
+
+.auth-banner:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) var(--tint-border), var(--border));
+  border-radius: var(--radius);
+  padding: 0.6rem 1rem;
+  margin-top: 1rem;
+}
+
+.auth-banner span {
+  flex: 1;
+}
+
+.unsaved-banner {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) var(--tint-border), var(--border));
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.75rem;
+  margin: 0 0 0.75rem;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 0.5em;
+  height: 0.5em;
+  margin-right: 0.4em;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .save-toast,
+  .action-status--ok {
+    animation: none;
+  }
+
+  .action-spinner {
+    animation: none;
+    opacity: 0.6; /* still visibly "something's happening" without the spin */
+  }
+}

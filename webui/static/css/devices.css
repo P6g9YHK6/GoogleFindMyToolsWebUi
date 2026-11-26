@@ -1,0 +1,139 @@
+/* Devices page "Last locate result" - just the newest reading (see
+   webui/routers/devices.py), with its own Map popover merged in from the
+   old separate Map column (see devices/_locate_cell.html). */
+.ping-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.map-menu-wrap {
+  /* Reset the generic `details {}` card chrome (background/border/padding/
+     shadow/margin-top) below - this is a small inline pill trigger, not
+     another nested card, and left un-reset it doubled up with the pill
+     styling on its own <summary> below (a bordered, padded box around a
+     bordered, padded pill). */
+  position: relative;
+  display: inline-block;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 0;
+  box-shadow: none;
+}
+
+.map-menu-wrap summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  box-shadow: none;
+  margin: 0;
+}
+
+.map-menu-wrap summary::-webkit-details-marker {
+  display: none;
+}
+
+.map-menu-wrap[open] summary {
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border-color: transparent;
+}
+
+.map-menu {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  left: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 9.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 0.3rem;
+  margin: 0;
+}
+
+.map-menu a {
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.map-menu a:hover {
+  background: var(--surface-alt);
+  text-decoration: none;
+}
+
+.ping-overflow {
+  margin-top: 0.3rem;
+  padding: 0;
+  background: none;
+  border: none;
+  box-shadow: none;
+}
+
+.ping-overflow summary {
+  color: var(--primary);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.ping-overflow .ping-row {
+  margin-top: 0.4rem;
+}
+
+/* A quiet, derived freshness indicator (webui/staleness.py's
+   display_status) - separate from the Alerts disclosure's opt-in alerting,
+   this just reflects how old the newest ping is. */
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-pill);
+  margin-bottom: 0.3rem;
+}
+
+.status-chip i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  display: block;
+}
+
+.status-chip--fresh {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) var(--tint-medium), transparent);
+}
+
+.status-chip--stale {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) var(--tint-medium), transparent);
+}
+
+.status-chip--off {
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) var(--tint-medium), transparent);
+}
+
+.status-chip--neutral {
+  color: var(--text-muted);
+  background: var(--surface-alt);
+}

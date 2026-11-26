@@ -1,0 +1,173 @@
+/* Forwarding log */
+/* Status/level pills - same tinted-badge language as .method-badge, so a
+   long Logs table (or the Staleness status column, which reuses these same
+   classes) scans by color at a glance instead of relying on text color
+   alone to separate an error from routine activity. */
+.log-ok, .log-error, .log-skipped, .log-critical, .log-warning, .log-info {
+  display: inline-block;
+  font-weight: 500;
+  padding: 0.15rem 0.55rem;
+  border-radius: var(--radius-pill);
+}
+
+.log-ok {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) var(--tint-medium), transparent);
+}
+
+.log-error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) var(--tint-medium), transparent);
+}
+
+.log-skipped {
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) var(--tint-medium), transparent);
+}
+
+.log-critical {
+  color: var(--danger);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--danger) var(--tint-medium), transparent);
+}
+
+.log-warning {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) var(--tint-medium), transparent);
+}
+
+.log-info {
+  color: var(--text);
+  background: var(--surface-alt);
+}
+
+.log-debug {
+  color: var(--text-muted);
+}
+
+/* Severity-as-a-stripe: the Logs table is hard-capped at 500 rows
+   server-side (see webui/routers/logs.py) so it's always a long, dense
+   list regardless of screen size - a left stripe keyed off the existing
+   .log-* pill (already on the Level cell) lets severity read before the
+   text does, without changing the row/cell markup itself. */
+table[data-table-id="logs"] tbody tr:has(.log-error) td:first-child,
+table[data-table-id="logs"] tbody tr:has(.log-critical) td:first-child {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
+table[data-table-id="logs"] tbody tr:has(.log-warning) td:first-child {
+  box-shadow: inset 3px 0 0 var(--warning);
+}
+
+table[data-table-id="logs"] tbody tr:has(.log-ok) td:first-child {
+  box-shadow: inset 3px 0 0 var(--success);
+}
+
+table[data-table-id="logs"] tbody tr:has(.log-skipped) td:first-child {
+  box-shadow: inset 3px 0 0 var(--border);
+}
+
+table[data-table-id="logs"] tbody tr td:first-child {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.staleness-ago {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* Same reset as .device-details - a quiet inline disclosure inside the
+   card, not another nested card on top of the one it already lives in.
+   Only the summary/status line shrinks to that same muted size; the form
+   itself stays at the card's normal, readable size since (unlike
+   .device-details' plain <ul>) it's an actual interactive form. */
+.device-alerts {
+  background: none;
+  border: none;
+  padding: 0;
+  box-shadow: none;
+  margin-top: 0.3rem;
+  max-width: 32rem;
+}
+
+.device-alerts > summary {
+  cursor: pointer;
+  color: var(--primary);
+  font-size: 0.8rem;
+}
+
+.duration-field {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.duration-custom {
+  width: 6rem;
+}
+
+.log-payload {
+  display: block;
+  max-width: 32rem;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-muted);
+}
+
+.log-response {
+  margin-top: 0.3rem;
+}
+
+/* Log filter toolbar */
+.log-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  margin: 1rem 0 1.25rem;
+}
+
+.log-filters input[type="text"] {
+  flex: 1 1 18rem;
+  min-width: 12rem;
+  max-width: 34rem; /* wider than the general input cap - it's the primary search box on this page */
+}
+
+.log-filters select {
+  flex: 0 1 auto;
+  min-width: 0; /* same <select> min-content footgun as .top-row label */
+}
+
+/* Lets a wide table (e.g. Logs, with its Detail/payload column) scroll
+   horizontally on narrow viewports instead of squeezing every column. */
+.table-scroll {
+  overflow-x: auto;
+}
+
+.table-scroll table {
+  min-width: 40rem;
+}
+
+/* A single long unbroken token (a URL, a stack trace path, ...) in the
+   Detail column would otherwise force the whole table wider than the page
+   with nothing to scroll it back in - every column would need horizontal
+   scrolling just to read, not only Detail. Let it wrap instead, so only a
+   genuinely narrow viewport ever needs .table-scroll's horizontal scroll. */
+.table-scroll td {
+  overflow-wrap: anywhere;
+}
+
+/* Live countdown under the Devices table's "Next poll" value (see
+   static/app.js's startNextPollCountdowns). Not .field-hint - that class's
+   negative top margin assumes a block sibling right after a <label>, which
+   doesn't fit a <span> inside a table cell. */
+.next-poll-countdown {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin-top: 0.15rem;
+}

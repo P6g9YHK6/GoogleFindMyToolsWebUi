@@ -1,0 +1,157 @@
+/* Devices page "Device" column - category/photo from Google's own device-
+   list response, plus a <details> toggle for the rest (manufacturer,
+   model, carrier, IMEI, sharing info - see devices/_table.html for why
+   those stay behind a click rather than in the always-visible row). */
+.device-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.device-thumb {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: var(--surface-alt);
+}
+
+/* Wraps .device-thumb so it's a real, keyboard-operable control (see
+   static/app.js's click handler and #device-image-modal in
+   devices/list.html) - reset to plain button chrome so it doesn't look
+   like a button, just a clickable photo. */
+.device-thumb-btn {
+  display: inline-flex;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+}
+
+.device-thumb-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Full-size device photo popup - a native <dialog>, so the centered
+   layout, the dimmed backdrop below, and Escape-to-close all come for
+   free instead of being hand-rolled. */
+.image-modal {
+  position: relative;
+  max-width: min(90vw, 640px);
+  max-height: 90vh;
+  padding: 1rem;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.image-modal::backdrop {
+  background: color-mix(in srgb, black 55%, transparent);
+}
+
+.image-modal-img {
+  display: block;
+  max-width: 100%;
+  max-height: 75vh;
+  margin: 0 auto;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+}
+
+.image-modal-caption {
+  margin: 0.6rem 0 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.image-modal-close {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+}
+
+.device-details {
+  /* Same reset as .map-menu-wrap above, and for the same reason - this is a
+     quiet inline disclosure inside a table cell/card, not another nested
+     card on top of the one it already lives in. */
+  background: none;
+  border: none;
+  padding: 0;
+  box-shadow: none;
+  margin-top: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.device-details summary {
+  cursor: pointer;
+  color: var(--primary);
+}
+
+.device-details ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.btn-icon {
+  /* Background at 80% opacity, but the border stays fully opaque - a
+     color-mix on the border too would fade it out along with the fill and
+     leave the button's edge looking washed out against the table row. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.95rem;
+  line-height: 1;
+  min-width: 2.1rem;
+  min-height: 2.1rem;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: var(--surface-alt);
+  box-shadow: none;
+}
+
+.btn-add {
+  background: var(--surface);
+  color: var(--primary);
+  border: 1px dashed var(--border);
+  box-shadow: none;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.6rem;
+}
+
+.btn-add:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--surface-alt);
+  box-shadow: none;
+}
+
+.body-type-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.body-type-row h3 {
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.body-type-row select {
+  width: auto;
+  flex: 0 1 11rem; /* shrinks (was 0 0, non-shrinking) instead of forcing the row wider than a narrow screen */
+  min-width: 8rem;
+}

@@ -1,0 +1,56 @@
+/* Full column width (a bare textarea defaults to ~20 cols), and grows with
+   its content the same way .url-autosize does - see endpoint_fields.js. */
+.body-textarea {
+  display: block;
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  min-height: 6rem;
+  resize: none;
+  overflow: hidden;
+}
+
+/* Variable chips */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem; /* was 0.4rem - a bit more breathing room between tap targets */
+  margin: 0.5rem 0 1rem;
+}
+
+.chip {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) var(--tint-weak), var(--surface));
+  border: 1px solid color-mix(in srgb, var(--primary) var(--tint-strong), var(--border));
+  border-radius: var(--radius-pill);
+  padding: 0.28rem 0.65rem;
+  box-shadow: none;
+  min-height: 2.1rem; /* the label itself stays compact; this just widens the tap target */
+}
+
+.chip:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 18%, var(--surface));
+  box-shadow: var(--shadow);
+}
+
+/* Request preview */
+.preview-block {
+  font-family: var(--font-mono);
+  font-size: 0.83rem;
+  line-height: 1.7;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.9rem 1rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  margin: 0;
+}
+
+.preview-block .preview-muted {
+  color: var(--text-muted);
+}

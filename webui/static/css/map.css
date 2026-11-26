@@ -1,0 +1,144 @@
+/* Map */
+#map-wrap {
+  position: relative;
+}
+
+#map {
+  height: 800px;
+  min-height: 200px;
+  max-height: 80vh;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+
+#map-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-alt);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  pointer-events: none;
+}
+
+/* A plain CSS `resize` handle on #map fights Leaflet for the same
+   mousedown/drag it uses to pan the map - dragging the native grip just
+   panned the tiles instead of resizing the container. This is our own
+   small handle instead (see static/app.js), sitting above every Leaflet
+   pane so it gets the pointer events first; Leaflet's attribution control
+   moves to bottom-left to stay clear of it. */
+.map-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 1.1rem;
+  height: 1.1rem;
+  cursor: ns-resize;
+  touch-action: none;
+  z-index: 1000;
+}
+
+.map-resize-handle::before {
+  content: "";
+  position: absolute;
+  right: 0.3rem;
+  bottom: 0.3rem;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  opacity: 0.6;
+}
+
+.map-resize-handle:hover::before {
+  opacity: 1;
+}
+
+body.map-resizing {
+  cursor: ns-resize !important;
+}
+
+body.map-resizing * {
+  cursor: ns-resize !important;
+  user-select: none;
+}
+
+.map-fullscreen-btn {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  z-index: 1000;
+}
+
+/* Leaflet's own container has no intrinsic size of its own in fullscreen -
+   it just inherits #map-wrap's height, so both need to stretch to the full
+   viewport together while the Fullscreen API has this element active. */
+#map-wrap:fullscreen {
+  height: 100vh;
+}
+
+#map-wrap:fullscreen #map {
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+}
+
+/* Leaflet's default .leaflet-div-icon styling adds a white box + border
+   behind divIcon content - our pins are self-contained SVG, so drop it. */
+.device-pin {
+  background: transparent;
+  border: none;
+}
+
+/* The pin SVG (not the marker's own positioning wrapper, which Leaflet
+   moves around with its own transform) bounces when its matching table row
+   is hovered - see static/app.js's bounceMarker. */
+.device-pin svg {
+  transform-origin: 50% 100%;
+}
+
+.device-pin svg.bounce {
+  animation: pin-bounce 0.6s ease-in-out infinite;
+}
+
+/* A pin's popup (static/app.js's popupLabel) - the local alias reads as a
+   secondary detail next to the device's real name, not equal billing. */
+.popup-alias {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+@keyframes pin-bounce {
+  0%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-10px); }
+  50% { transform: translateY(0); }
+  65% { transform: translateY(-4px); }
+  80% { transform: translateY(0); }
+}
+
+/* Locate-result list: a colored dot per location, matching its map pin
+   (see webui/colors.py's location_color / static/app.js's colorForKey),
+   glowing when that pin is hovered (static/app.js's glowRows). */
+.loc-dot {
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  margin-right: 0.4rem;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  background: var(--dot-color, var(--text-muted));
+  vertical-align: middle;
+}
+
+li[data-loc-key] {
+  transition: text-shadow 0.15s ease;
+}
+
+li[data-loc-key].loc-glow {
+  text-shadow: 0 0 6px var(--dot-color), 0 0 12px var(--dot-color);
+}

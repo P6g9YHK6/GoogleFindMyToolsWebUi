@@ -1,0 +1,334 @@
+/* Forwarding settings: endpoints - also reused by the Apprise URL list and
+   both YAML editors (see webui/templates/auth/_app_settings*.html and
+   settings/_device_yaml.html), which is why every one of those stays a
+   plain <textarea>. The endpoint editor's own URL field is the one
+   exception - it's a contenteditable <div> instead (see the comment in
+   _endpoint_fields.html for why), so it needs its own look and :focus ring
+   repeated here rather than picked up for free from the site-wide
+   input/select/textarea rule above, which only targets those tags.
+   overflow-wrap only kicks in where wrapping is allowed in the first
+   place, so it's a no-op on .yaml-editor's own `white-space: pre`
+   (intentional there - YAML is indentation-sensitive) and only actually
+   wraps a long unbroken URL/token instead of overflowing. */
+.url-input {
+  display: block;
+  width: 100%;
+  overflow-wrap: anywhere;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 0.92rem;
+  font-weight: 400;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.65rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.url-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) var(--tint-focus), transparent);
+}
+
+/* Only the endpoint URL field is contenteditable (the Apprise/YAML reuses
+   above stay real textareas, which already get this from the site-wide
+   rule) - pinned to the same monospace stack the YAML editor uses, not
+   the page's regular proportional font, and white-space/cursor set
+   explicitly since a div doesn't default to either the way a textarea
+   does. */
+.url-input[contenteditable] {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  cursor: text;
+}
+
+/* The endpoint editor's own URL field (not the Apprise/YAML reuses above,
+   which stay manually resizable) grows and shrinks with its content instead
+   - endpoint_fields.js sets its height from scrollHeight on load, on input,
+   and on window resize (wrapping changes with field width). resize:none
+   because a manual drag-handle would just get overwritten by the next
+   autosize pass; overflow:hidden keeps a momentary pre-resize scrollbar
+   from flashing before JS catches up. */
+.url-autosize {
+  resize: none;
+  overflow: hidden;
+  min-height: 2.3rem;
+}
+
+.endpoints-container {
+  counter-reset: endpoint;
+}
+
+.endpoint-block {
+  counter-increment: endpoint;
+}
+
+.endpoint-block > legend .endpoint-index::before {
+  content: "Endpoint " counter(endpoint);
+  font-weight: 600;
+}
+
+.endpoint-legend-text {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.endpoint-block--new {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent), var(--shadow);
+}
+
+.new-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  border-radius: var(--radius-pill);
+  padding: 0.15rem 0.55rem;
+}
+
+.btn-secondary {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+  margin-right: 0.5rem;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-alt);
+  box-shadow: var(--shadow);
+}
+
+.btn-remove {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 0.25rem 0.55rem;
+  margin-left: 0.5rem;
+  min-height: 2.1rem; /* ~34px - a comfortable tap target, the padding above alone is too short */
+}
+
+.btn-remove:hover:not(:disabled) {
+  background: var(--surface-alt);
+  box-shadow: none;
+}
+
+.form-error {
+  color: var(--danger);
+  font-weight: 500;
+}
+
+.endpoint-status {
+  font-size: 0.85rem;
+}
+
+.endpoint-status--ok {
+  color: var(--success);
+}
+
+.endpoint-status--error {
+  color: var(--danger);
+  font-weight: 500;
+}
+
+.endpoint-status--skipped {
+  color: var(--text-muted);
+}
+
+.field-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: -0.5rem 0 0.75rem;
+  /* Same readable-line-length reasoning as `p` above - a no-op on the few
+     places this class sits on an inline <span> instead of a <p>. */
+  max-width: 65ch;
+}
+
+.checkbox-label {
+  flex-direction: row;
+  align-items: center;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+}
+
+.checkbox-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.checkbox-stack label {
+  margin: 0;
+}
+
+/* Cron */
+.cron-raw.cron-invalid {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent);
+}
+
+.cron-advanced {
+  margin: 0.75rem 0 0;
+}
+
+.cron-examples {
+  margin: 0 0 0.75rem;
+  padding-left: 1.15rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.cron-examples li {
+  margin: 0.2rem 0;
+}
+
+.cron-preview {
+  margin: 0.75rem 0 0;
+}
+
+/* Preview/Request/Schedule/Variables/Filters fieldsets inside an endpoint
+   block - Preview always sits alone on top (it's a summary of everything
+   below it, so it reads oddly sandwiched between two same-width columns).
+   Request+Schedule and Variables+Filters stack as two single-column
+   sections by default (mobile-first); once there's room for two ~320px
+   columns side by side, they flow into a left/right pair instead of each
+   eating the block's full width down the page. */
+.endpoint-columns {
+  display: block;
+}
+
+.endpoint-col-left,
+.endpoint-col-right {
+  min-width: 0;
+}
+
+@media (min-width: 700px) {
+  .endpoint-columns {
+    display: flex;
+    gap: 1rem;
+    align-items: start;
+  }
+
+  .endpoint-col-left,
+  .endpoint-col-right {
+    flex: 1 1 0;
+  }
+}
+
+/* Query-builder endpoint block: preset + top-level fields */
+.top-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.top-row label {
+  flex: 1 1 220px;
+  /* Flex items default to min-width: auto, which for a <select> resolves to
+     its widest <option>'s own width ("Traccar (OsmAnd protocol)", ...) -
+     flex-shrink then has nothing to shrink below and the row overflows the
+     viewport instead of wrapping, on a narrow enough screen. This lets it
+     actually shrink to the 220px basis (and below, if wrapped) like a plain
+     text input already would. */
+  min-width: 0;
+  max-width: 26rem; /* matches the input/select cap above - stops the whole label+field growing wastefully wide on a large monitor */
+}
+
+.method-url-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: flex-start;
+  margin: 0.75rem 0 1rem;
+}
+
+.method-field {
+  flex: 0 0 8rem;
+  min-width: 0; /* same <select> min-content footgun as .top-row label above */
+}
+
+.url-row-field {
+  /* Same 220px wrap point as .top-row above - narrower than that and the
+     URL field drops to its own line under Method instead of squeezing. */
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.method-field label, .url-row-field label {
+  margin: 0;
+}
+
+/* Query params / headers / variables key-value tables */
+.kv-section {
+  margin: 1rem 0;
+  /* The Headers table has no responsive treatment of its own the way
+     Devices/Logs do (see .table-scroll) - two text inputs plus a remove
+     button don't fit a narrow phone screen without this, and unlike those
+     tables a forced min-width would be overkill for just 3 columns, so
+     this scrolls only as much as the inputs' own natural minimum width
+     actually needs. */
+  overflow-x: auto;
+}
+
+.kv-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.kv-head h3 {
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.kv-body td {
+  padding: 0.45rem 0.6rem;
+}
+
+.kv-body input[type="text"] {
+  /* Without this an <input>'s intrinsic ~20-character width just sits
+     inside whatever the table cell happens to be, not tracking it - too
+     cramped for a real value on a narrow screen, wastefully narrow on a
+     wide one. */
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+}
+
+.kv-remove-cell {
+  width: 2.75rem;
+  padding: 0.3rem 0.4rem !important;
+}
+
+.btn-remove-row {
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  box-shadow: none;
+  padding: 0.5rem 0.6rem; /* the x icon itself stays small (font-size below); this just widens the tap target */
+  font-size: 0.85rem;
+  line-height: 1;
+  min-width: 2.1rem;
+  min-height: 2.1rem;
+}
+
+.btn-remove-row:hover:not(:disabled) {
+  color: var(--danger);
+  background: transparent;
+  box-shadow: none;
+}

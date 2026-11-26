@@ -1,0 +1,42 @@
+/* Mobile nav: the sidebar (desktop) gives way to a top bar + hamburger-
+   opened slide-out drawer below 768px - same 6 links either way (see
+   base.html). */
+@media (max-width: 768px) {
+  .sidebar {
+    display: none;
+  }
+
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    padding: 0.7rem 0;
+    margin: 0 0 1rem;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 10;
+  }
+
+  .mobile-topbar .side-brand {
+    padding: 0;
+  }
+
+  .app-shell {
+    flex-direction: column;
+  }
+
+  .app-main {
+    padding-left: 0;
+  }
+}
+
+@media (min-width: 769px) {
+  .drawer-backdrop {
+    display: none !important;
+  }
+}

@@ -1,0 +1,247 @@
+/* Nav shell: a desktop sidebar + a mobile hamburger/slide-out drawer, both
+   rendering the same set of links from base.html. .app-shell is the flex
+   row (sidebar + main content); the sidebar collapses into the drawer
+   pattern below a 768px breakpoint rather than the old flat top bar that
+   just wrapped. */
+.app-shell {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+}
+
+/* Content column next to the sidebar. main's auto margins only leave a gap
+   once the window is wider than its max-width, so at medium widths it would
+   otherwise sit flush against the sidebar's border. */
+.app-main {
+  flex: 1;
+  min-width: 0;
+  padding-left: 1.5rem;
+}
+
+.icon {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+  vertical-align: middle;
+}
+
+.icon-sm {
+  width: 14px;
+  height: 14px;
+}
+
+.sidebar {
+  flex: 0 0 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  padding: 1.25rem 0.9rem;
+  background: var(--surface-alt);
+  border-right: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.side-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0 0.4rem;
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.side-brand img {
+  height: 26px;
+  width: auto;
+  display: block;
+}
+
+.sidebar nav, .drawer nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+}
+
+.sidebar nav a, .drawer nav a {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.87rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sidebar nav a:hover, .drawer nav a:hover {
+  color: var(--text);
+  background: var(--surface);
+  text-decoration: none;
+}
+
+.sidebar nav a.active, .drawer nav a.active {
+  color: var(--primary-contrast);
+  background: var(--primary);
+}
+
+/* Labelled build/uptime/clock rows: muted labels, monospace values. */
+.side-foot {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  padding: 0 0.4rem;
+}
+
+.side-foot-info {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.6rem;
+  margin: 0;
+}
+
+.side-foot-info dt {
+  font-weight: 500;
+}
+
+.side-foot-info dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  color: var(--text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.side-foot-links {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+}
+
+/* Theme switch (Light/Dark/System - see the inline script in base.html's
+   <head> that applies the saved choice before first paint). */
+.theme-switch {
+  display: flex;
+  gap: 2px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 3px;
+}
+
+.theme-switch button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  flex: 1;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 0.4rem 0.3rem;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.theme-switch button.active {
+  background: var(--primary);
+  color: var(--primary-contrast);
+}
+
+/* Mobile top bar + hamburger - hidden entirely on wider screens (see the
+   768px breakpoint at the bottom of this file), where the sidebar above is
+   always visible instead. */
+.mobile-topbar {
+  display: none;
+}
+
+.hamburger {
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  padding: 0.45rem;
+  min-width: 2.3rem;
+  min-height: 2.3rem;
+}
+
+.drawer-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, black 40%, transparent);
+  z-index: 50;
+}
+
+.drawer-backdrop.open {
+  display: flex;
+}
+
+.drawer {
+  width: min(78vw, 280px);
+  height: 100%;
+  background: var(--surface-alt);
+  border-right: 1px solid var(--border);
+  padding: 1.1rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  overflow-y: auto;
+}
+
+.drawer .side-brand {
+  justify-content: space-between;
+}
+
+.drawer-close {
+  margin-left: auto;
+}
+
+/* Footer */
+footer {
+  max-width: min(1800px, 96vw); /* matches main's width above, see its comment */
+  margin: 3rem auto 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+footer a {
+  color: var(--text-muted);
+  text-decoration: underline;
+}
+
+footer a:hover {
+  color: var(--text);
+}
+
+.demo-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) var(--tint-medium), transparent);
+  border-radius: var(--radius-pill);
+  padding: 0.1rem 0.5rem;
+}
