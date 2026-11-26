@@ -8,7 +8,6 @@
 [![Docker](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/actions/workflows/docker-publish.yml)
 [![Firmware build](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/actions/workflows/build-firmware-zephyr.yml/badge.svg)](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/actions/workflows/build-firmware-zephyr.yml)
 [![License](https://img.shields.io/github/license/P6g9YHK6/GoogleFindMyToolsWebUi)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/P6g9YHK6/GoogleFindMyToolsWebUi)](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/releases)
 [![GHCR](https://img.shields.io/badge/ghcr.io-googlefindmytools-blue?logo=docker)](https://github.com/users/P6g9YHK6/packages/container/package/googlefindmytools)
 [![Pulls](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fgithub.com%2Fipitio%2Fbackage%2Fraw%2Findex%2FP6g9YHK6%2FGoogleFindMyToolsWebUi%2Fgooglefindmytools.json&query=%24.downloads&logo=docker&label=pulls)](https://github.com/users/P6g9YHK6/packages/container/package/googlefindmytools)
 [![Last commit](https://img.shields.io/github/last-commit/P6g9YHK6/GoogleFindMyToolsWebUi/dev)](https://github.com/P6g9YHK6/GoogleFindMyToolsWebUi/commits/dev)
