@@ -4,8 +4,9 @@ Picking one of these in the settings UI just pre-fills method/url/headers/
 body with a sensible default for that destination - nothing about actually
 sending an endpoint (see webui/forwarders/custom.py) branches on which
 preset, if any, it came from, and nothing about which preset was used is
-ever saved (see webui/routers/settings.py's update_device_settings, which
-always writes "type": "custom") - a preset is a one-time template for
+ever saved (see webui/forwarders/settings_service.py's
+parse_endpoints_form, which only ever writes "transport": "http") - a
+preset is a one-time template for
 starting a *new* endpoint, not an ongoing property of one. Query params
 aren't a separate concept either: they're baked directly into each preset's
 "url" as a literal querystring, same as a user would type one by hand.
@@ -24,8 +25,8 @@ _OWNTRACKS_BODY = (
 )
 
 PRESETS: dict[str, dict] = {
-    "custom": {
-        "label": "Custom",
+    "http": {
+        "label": "Custom HTTP",
         "hint": "A blank request - set the method, URL (add ?query=params directly in it if you need them) and whatever headers or body it needs.",
         "method": "GET",
         "url": "",
@@ -189,7 +190,7 @@ PRESETS: dict[str, dict] = {
     },
 }
 
-DEFAULT_PRESET_KEY = "custom"
+DEFAULT_PRESET_KEY = "http"
 
 # (variable name, human description) - shown as clickable chips in the
 # Variables panel, split into two groups there (see webui/routers/
@@ -272,6 +273,7 @@ def blank_endpoint(cron: str) -> dict:
     starting from the Custom preset."""
     preset = PRESETS[DEFAULT_PRESET_KEY]
     return {
+        "transport": "http",
         "type": DEFAULT_PRESET_KEY,
         "alias": "",
         "method": preset["method"],

@@ -40,6 +40,12 @@ def _format_line(entry: dict) -> str:
     ])
 
 
+# What endpoint_type held before it became the endpoint's transport: the old
+# "type" field ("custom", or a legacy "traccar"/"phonetrack"), or nothing
+# once saving through the settings form had dropped it. All plain HTTP.
+_PRE_TRANSPORT_TYPES = {"", "custom", "traccar", "phonetrack"}
+
+
 def _parse_line(line: str) -> dict | None:
     parts = line.split("\t", 7)
     if len(parts) == 6:
@@ -57,7 +63,7 @@ def _parse_line(line: str) -> dict | None:
         "time": entry_time,
         "canonic_id": canonic_id,
         "device_name": device_name,
-        "endpoint_type": endpoint_type,
+        "endpoint_type": "http" if endpoint_type in _PRE_TRANSPORT_TYPES else endpoint_type,
         "target": target,
         "status": status,
         "payload": payload,

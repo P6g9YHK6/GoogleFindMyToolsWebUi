@@ -49,7 +49,7 @@
     {% endif %}
   </div>
   {% if is_new %}
-    <p class="field-hint preset-hint">{{ (presets.get(endpoint.type) or presets.get('custom')).hint }}</p>
+    <p class="field-hint preset-hint">{{ (presets.get(endpoint.type) or presets.get('http')).hint }}</p>
   {% endif %}
 
   <div class="endpoint-sections">

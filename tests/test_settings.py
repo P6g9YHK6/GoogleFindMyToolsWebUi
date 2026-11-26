@@ -997,7 +997,7 @@ def test_save_device_yaml_persists_and_reflects_in_the_form(client):
     yaml_text = (
         "display_name: Renamed From YAML\n"
         "endpoints:\n"
-        "  - type: traccar\n"  # ignored on save, never persisted - see _from_yaml_doc
+        "  - type: traccar\n"  # an export from before "transport" - imports as http, type dropped
         "    method: GET\n"
         "    url: http://yaml.example\n"
         "    params: {}\n"
@@ -1019,7 +1019,7 @@ def test_save_device_yaml_persists_and_reflects_in_the_form(client):
     saved = config_store.get_device_config(FAKE_CANONIC_ID)
     assert saved["display_name"] == "Renamed From YAML"
     assert saved["endpoints"] == [{
-        "method": "GET", "url": "http://yaml.example",
+        "transport": "http", "method": "GET", "url": "http://yaml.example",
         "params": {}, "headers": {}, "body_type": "none", "body": "",
         "variables": {"device_id": "yaml-dev"}, "cron": "*/10 * * * *",
     }]
@@ -1482,3 +1482,48 @@ def test_settings_page_embeds_this_devices_real_preview_values(client, tmp_path,
     assert resp.status_code == 200
     assert '<script type="application/json" class="device-preview-values">' in resp.text
     assert '"latitude": 12.5' in resp.text
+
+
+# --- endpoint transport in the YAML view -----------------------------------
+
+def test_yaml_export_names_each_endpoints_transport():
+    from webui.forwarders.settings_service import to_yaml_doc
+
+    doc = to_yaml_doc("Keys", [{"url": "http://x/", "cron": "*/5 * * * *"}])
+
+    assert doc["endpoints"] == [{"transport": "http", "url": "http://x/", "cron": "*/5 * * * *"}]
+    assert next(iter(doc["endpoints"][0])) == "transport"
+
+
+def test_yaml_import_without_transport_is_http():
+    from webui.forwarders.settings_service import from_yaml_doc
+
+    endpoints, _, error = from_yaml_doc("endpoints:\n  - url: http://x/\n    cron: '*/5 * * * *'\n")
+
+    assert error is None
+    assert endpoints[0]["transport"] == "http"
+
+
+def test_yaml_import_rejects_an_unknown_transport():
+    from webui.forwarders.settings_service import from_yaml_doc
+
+    endpoints, _, error = from_yaml_doc("endpoints:\n  - transport: carrier-pigeon\n    url: http://x/\n")
+
+    assert endpoints == []
+    assert "transport" in error and "carrier-pigeon" in error
+
+
+def test_form_save_writes_the_transport(client):
+    from webui.forwarders import config_store
+
+    _post_form(
+        client,
+        f"/settings/devices/{FAKE_CANONIC_ID}",
+        display_name="My Tracker",
+        ep_order=["0"],
+        **{"ep-0-url": "http://x/", "ep-0-cron": "*/5 * * * *", "ep-0-endpoint_type": "traccar"},
+    )
+
+    endpoint = config_store.get_device_config(FAKE_CANONIC_ID)["endpoints"][0]
+    assert endpoint["transport"] == "http"
+    assert "type" not in endpoint

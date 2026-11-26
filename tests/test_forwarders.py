@@ -7,7 +7,7 @@ from webui.forwarders import PRESETS, blank_endpoint
 
 def test_presets_cover_traccar_and_phonetrack_and_custom():
     assert set(PRESETS) == {
-        "custom", "traccar", "phonetrack",
+        "http", "traccar", "phonetrack",
         "phonetrack_osmand", "phonetrack_gpslogger", "phonetrack_locusmap",
         "phonetrack_ulogger", "phonetrack_owntracks", "phonetrack_overland",
         "owntracks_recorder", "owntracks_home_assistant",
@@ -115,7 +115,8 @@ def test_traccar_preset_renders_a_parseable_url_for_a_named_location_with_no_alt
 def test_blank_endpoint_starts_from_the_custom_preset():
     blank = blank_endpoint("*/5 * * * *")
     assert blank["cron"] == "*/5 * * * *"
-    assert blank["type"] == "custom"
+    assert blank["type"] == "http"
+    assert blank["transport"] == "http"
     assert blank["method"] == "GET"
     assert blank["url"] == ""
     assert "params" not in blank
@@ -807,7 +808,7 @@ def test_config_store_migrates_legacy_single_destination_shape(tmp_path, monkeyp
     normalized = config_store.normalize_device_config(legacy)
     assert len(normalized["endpoints"]) == 1
     ep = normalized["endpoints"][0]
-    assert ep["type"] == "traccar"
+    assert ep["transport"] == "http"
     assert ep["url"].startswith("http://a/?")
     assert "lat={{latitude}}" in ep["url"]
     assert "params" not in ep
@@ -1009,6 +1010,23 @@ def test_log_store_reads_pre_payload_lines_as_blank(tmp_path, monkeypatch):
     assert entries[0]["status"] == "ok"
     assert entries[0]["payload"] == ""
     assert entries[0]["response"] == ""
+
+
+def test_log_store_reads_pre_transport_types_as_http(tmp_path, monkeypatch):
+    from webui import config
+    from webui.forwarders import log_store
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    log_path = tmp_path / "forward.log"
+    monkeypatch.setattr(config, "FORWARD_LOG_PATH", log_path)
+
+    # endpoint_type before it became the transport: the old "type" field, or blank.
+    log_path.write_text("".join(
+        f"{i}\tdev-1\tMy Tracker\t{old}\thttp://x\tok\t\t\n"
+        for i, old in enumerate(["custom", "", "traccar", "phonetrack", "http"], start=1)
+    ))
+
+    assert [e["endpoint_type"] for e in log_store.recent_entries()] == ["http"] * 5
 
 
 def test_log_store_reads_pre_response_lines_as_blank(tmp_path, monkeypatch):

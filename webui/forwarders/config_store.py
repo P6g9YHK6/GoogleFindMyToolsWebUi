@@ -2,7 +2,7 @@ import logging
 
 from webui import config, device_store
 from webui.forwarders import latest_values_store
-from webui.forwarders.presets import PRESETS
+from webui.forwarders.presets import DEFAULT_PRESET_KEY, PRESETS
 
 logger = logging.getLogger("webui.forwarders.config_store")
 
@@ -99,8 +99,7 @@ def _migrate_legacy_endpoint(entry: dict) -> dict:
             # Unknown/missing legacy type - fall back to Custom/blank rather than
             # silently dropping the endpoint; the URL is just empty until the
             # user fills it back in themselves.
-            preset = PRESETS["custom"]
-            migrated.setdefault("type", "custom")
+            preset = PRESETS[DEFAULT_PRESET_KEY]
             migrated["method"] = preset["method"]
             migrated["url"] = preset["url"]
             migrated["headers"] = dict(preset["headers"])
@@ -110,6 +109,19 @@ def _migrate_legacy_endpoint(entry: dict) -> dict:
         entry = migrated
 
     return _fold_params_into_url(entry)
+
+
+def _set_transport(entry: dict) -> dict:
+    """Every endpoint says how it's sent ("transport": "http" for now), in
+    place of the old "type" field. That one held "custom" (or a legacy
+    "traccar"/"phonetrack" from the pre-query-builder shape above), was
+    dropped on every save through the settings form, and so was missing on
+    some endpoints and stale on others. All of those were always plain HTTP
+    requests. A no-op on an endpoint that's already migrated."""
+    if not isinstance(entry, dict) or ("type" not in entry and "transport" in entry):
+        return entry
+    rest = {k: v for k, v in entry.items() if k != "type"}
+    return {"transport": rest.pop("transport", "http"), **rest}
 
 
 def _strip_endpoint_state(entry: dict) -> dict:
@@ -124,12 +136,16 @@ def _strip_endpoint_state(entry: dict) -> dict:
     return {k: v for k, v in entry.items() if k not in latest_values_store.STATE_KEYS}
 
 
+def _migrate_endpoint(entry: dict) -> dict:
+    return _strip_endpoint_state(_set_transport(_migrate_legacy_endpoint(entry)))
+
+
 def normalize_device_config(device_cfg: dict) -> dict:
     """Convert a pre-multi-endpoint device record into the current
     endpoints-list shape, and every endpoint in it into the current generic
     query-builder shape. A no-op (same object) on records that need neither."""
     if "endpoints" in device_cfg:
-        migrated_endpoints = [_strip_endpoint_state(_migrate_legacy_endpoint(e)) for e in device_cfg["endpoints"]]
+        migrated_endpoints = [_migrate_endpoint(e) for e in device_cfg["endpoints"]]
         if migrated_endpoints == device_cfg["endpoints"]:
             return device_cfg
         normalized = dict(device_cfg)
@@ -155,7 +171,7 @@ def normalize_device_config(device_cfg: dict) -> dict:
         endpoints.append({"type": "phonetrack", "phonetrack": old_phonetrack, "cron": cron_expr})
     # destination == "none" (or missing) -> empty list, forwarding stays disabled
 
-    normalized["endpoints"] = [_strip_endpoint_state(_migrate_legacy_endpoint(e)) for e in endpoints]
+    normalized["endpoints"] = [_migrate_endpoint(e) for e in endpoints]
     return normalized
 
 
@@ -163,7 +179,7 @@ def normalize_device_config(device_cfg: dict) -> dict:
 # shape" means. A device's config saved under an older version gets migrated
 # and written back the first time it's loaded, instead of being re-migrated
 # (and never persisted) on every single load forever.
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 
 def load() -> dict:

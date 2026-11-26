@@ -348,12 +348,12 @@ def demo_forward_log_entries() -> list[dict]:
             ago = ep.get("last_forward_ago_s", 0)
             entries.append({
                 "time": now - ago, "canonic_id": canonic_id, "device_name": device_name,
-                "endpoint_type": "custom", "target": target, "status": status,
+                "endpoint_type": "http", "target": target, "status": status,
                 "payload": "", "response": response, "level": level,
             })
             entries.append({
                 "time": now - ago - 300, "canonic_id": canonic_id, "device_name": device_name,
-                "endpoint_type": "custom", "target": target, "status": "ok",
+                "endpoint_type": "http", "target": target, "status": "ok",
                 "payload": "", "response": "200 OK", "level": "ok",
             })
     entries.sort(key=lambda e: e["time"], reverse=True)

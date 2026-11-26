@@ -197,7 +197,7 @@ async def _poll_device(canonic_id: str):
                 log_store.append(
                     canonic_id=canonic_id,
                     device_name=name,
-                    endpoint_type=endpoints[i].get("type", ""),
+                    endpoint_type=endpoints[i].get("transport", "http"),
                     target=_endpoint_target(endpoints[i]),
                     status=status,
                     payload=_serialize_location(location),
@@ -285,7 +285,7 @@ async def forward_now(canonic_id: str, index: int) -> dict | None:
         log_store.append(
             canonic_id=canonic_id,
             device_name=name,
-            endpoint_type=endpoint_cfg.get("type", ""),
+            endpoint_type=endpoint_cfg.get("transport", "http"),
             target=_endpoint_target(endpoint_cfg),
             status=status,
             payload=_serialize_location(endpoint_location),

@@ -1,6 +1,8 @@
 """Tests for webui/forwarders/config_store.py - migration and normalization."""
 
 
+import pytest
+
 from webui.forwarders import config_store
 from webui.forwarders.presets import PRESETS
 
@@ -56,13 +58,13 @@ def test_fold_params_into_url_preserves_tokens():
 
 
 def test_migrate_legacy_endpoint_unknown_type():
-    """Unknown legacy type falls back to custom preset (method/url from preset)."""
+    """Unknown legacy type falls back to the blank HTTP preset (method/url from preset)."""
     entry = {"type": "unknown_type", "some": "data"}
     result = config_store._migrate_legacy_endpoint(entry)
-    # Type preserved from original, but method/url from custom preset
+    # Type preserved from original (_set_transport drops it later), method/url from the preset
     assert result["type"] == "unknown_type"
-    assert result["method"] == PRESETS["custom"]["method"]
-    assert result["url"] == PRESETS["custom"]["url"]
+    assert result["method"] == PRESETS["http"]["method"]
+    assert result["url"] == PRESETS["http"]["url"]
     assert result["headers"] == {}
     assert result["body_type"] == "none"
     # Original data preserved
@@ -99,9 +101,36 @@ def test_strip_endpoint_state_noop():
 
 
 def test_normalize_device_config_endpoints_shape():
-    """Already in endpoints shape -> no change."""
-    cfg = {"endpoints": [{"url": "http://x"}]}
+    """Already in the current shape -> no change."""
+    cfg = {"endpoints": [{"transport": "http", "url": "http://x"}]}
     assert config_store.normalize_device_config(cfg) is cfg
+
+
+@pytest.mark.parametrize("entry", [
+    {"type": "custom", "url": "http://x"},
+    {"url": "http://x"},
+    {"type": "traccar", "url": "http://x"},
+], ids=["custom", "no type", "legacy traccar"])
+def test_every_existing_endpoint_becomes_http(entry):
+    result = config_store.normalize_device_config({"endpoints": [entry]})
+    assert result["endpoints"] == [{"transport": "http", "url": "http://x"}]
+
+
+def test_set_transport_keeps_an_explicit_transport():
+    entry = {"transport": "http", "url": "http://x"}
+    assert config_store._set_transport(entry) is entry
+
+
+def test_transport_migration_is_written_back_once(tmp_path, monkeypatch):
+    from webui import config, device_store
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "DEVICES_PATH", tmp_path / "devices.yaml")
+    device_store.mutate_device("id1", lambda e: e.update(config={"endpoints": [{"type": "custom", "url": "http://x"}]}))
+
+    config_store.load()
+
+    assert device_store.load()["devices"]["id1"]["config"]["endpoints"] == [{"transport": "http", "url": "http://x"}]
 
 
 def test_normalize_device_config_legacy_destination_traccar():
@@ -112,7 +141,8 @@ def test_normalize_device_config_legacy_destination_traccar():
     assert len(result["endpoints"]) == 1
     # The endpoint gets fully migrated to the new generic shape
     ep = result["endpoints"][0]
-    assert ep["type"] == "traccar"
+    assert ep["transport"] == "http"
+    assert "type" not in ep
     assert ep["cron"] == "*/5 * * * *"
     assert ep["method"] == "GET"
     assert ep["url"].startswith("http://t/?id={{device_id}}")
@@ -125,7 +155,8 @@ def test_normalize_device_config_legacy_destination_phonetrack():
     result = config_store.normalize_device_config(cfg)
     assert "endpoints" in result
     assert len(result["endpoints"]) == 1
-    assert result["endpoints"][0]["type"] == "phonetrack"
+    assert result["endpoints"][0]["transport"] == "http"
+    assert "type" not in result["endpoints"][0]
 
 
 def test_normalize_device_config_destination_none():

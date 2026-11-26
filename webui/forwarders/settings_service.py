@@ -156,12 +156,21 @@ async def row(canonic_id: str, overrides: dict[str, dict] | None = None, saved: 
     )
 
 
+TRANSPORTS = ("http",)
+
+
+def _with_transport(endpoint: dict) -> dict:
+    """Drops the preset key ("type", a one-time template choice) and makes
+    "transport" explicit, first, so an export made before it existed (no
+    "transport" at all) still imports as the HTTP endpoint it always was."""
+    rest = {k: v for k, v in endpoint.items() if k not in ("type", "transport")}
+    return {"transport": endpoint.get("transport") or "http", **rest}
+
+
 def to_yaml_doc(display_name: str, endpoints: list[dict]) -> dict:
     """The YAML editor's view of a device: alias and endpoints - no
-    "google_name" (read-only, fed from Google's device list), and no
-    per-endpoint "type" (always the same generic query-builder shape now)."""
-    clean_endpoints = [{k: v for k, v in ep.items() if k != "type"} for ep in endpoints]
-    return {"display_name": display_name, "endpoints": clean_endpoints}
+    "google_name" (read-only, fed from Google's device list)."""
+    return {"display_name": display_name, "endpoints": [_with_transport(ep) for ep in endpoints]}
 
 
 def from_yaml_doc(yaml_text: str) -> tuple[list[dict], str, str | None]:
@@ -181,13 +190,17 @@ def from_yaml_doc(yaml_text: str) -> tuple[list[dict], str, str | None]:
         for i, endpoint in enumerate(parsed["endpoints"]):
             if not isinstance(endpoint, dict):
                 raise ValueError(f"endpoints[{i}] must be a mapping")
+            if endpoint.get("transport", "http") not in TRANSPORTS:
+                raise ValueError(
+                    f"endpoints[{i}].transport must be one of {', '.join(TRANSPORTS)}, not {endpoint['transport']!r}"
+                )
         parsed.setdefault("display_name", "")
         if not isinstance(parsed["display_name"], str):
             raise ValueError("\"display_name\" must be a string")
     except (yaml.YAMLError, ValueError) as e:
         return [], "", f"Invalid YAML: {e}"
 
-    endpoints = [{k: v for k, v in ep.items() if k != "type"} for ep in parsed["endpoints"]]
+    endpoints = [_with_transport(ep) for ep in parsed["endpoints"]]
     return endpoints, parsed["display_name"], None
 
 
@@ -223,9 +236,9 @@ def parse_endpoints_form(form: FormData, existing_endpoints: list[dict]) -> tupl
             continue  # unfilled "+ Add endpoint" block, drop it silently
 
         # The Preset dropdown (presets.py) is a one-time template, never a
-        # saved property - ignored here even if posted. No "type" either -
-        # every endpoint saved through this form is the same generic shape.
+        # saved property - ignored here even if posted.
         entry: dict[str, Any] = {
+            "transport": "http",
             "method": (field("method", "GET").strip().upper() or "GET"),
             "url": url,
         }
